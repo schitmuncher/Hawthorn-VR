@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Hawkthorne VR</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1a1424">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1424; --panel: rgba(22, 17, 34, 0.92); --gold: #f6d36b; --text: #f4eefb; --muted: #b9aecb;
+    --leaf: #5fd36b; --sky: #73def9;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--sky); color: var(--text);
+    font-family: "Press Start 2P", ui-monospace, monospace; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #game, #game canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  /* ---------- start screen ---------- */
+  #start { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px;
+    background: radial-gradient(ellipse at 50% 120%, rgba(26,20,36,.15), rgba(26,20,36,.75)); transition: opacity .3s; z-index: 10; overflow: auto; }
+  body.playing #start { opacity: 0; pointer-events: none; }
+  .card { width: min(560px, 100%); background: var(--panel); border: 4px solid var(--gold); border-radius: 18px;
+    padding: 22px 20px 18px; box-shadow: 0 8px 0 #000a, 0 20px 60px #0008; }
+  h1 { margin: 0 0 4px; font-size: clamp(18px, 5vw, 28px); color: var(--gold); text-shadow: 3px 3px 0 #000; letter-spacing: 1px; line-height: 1.3; }
+  .sub { color: var(--muted); font-size: 10px; line-height: 1.7; margin: 0 0 16px; }
+  .label { font-size: 10px; color: var(--muted); margin: 14px 0 8px; }
+  #chars { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; max-height: 210px; overflow-y: auto; padding: 2px; }
+  .char { background: #2b2238; border: 3px solid transparent; border-radius: 10px; padding: 4px 2px 6px; display: grid; justify-items: center; gap: 2px; }
+  .char canvas { width: 48px; height: 48px; image-rendering: pixelated; }
+  .char span { font-size: 7px; color: var(--muted); white-space: nowrap; overflow: hidden; max-width: 60px; text-overflow: ellipsis; }
+  .char.on { border-color: var(--gold); background: #3a2d4b; }
+  .char.on span { color: var(--text); }
+  .row { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+  .big { flex: 1 1 200px; padding: 16px 12px; border-radius: 12px; border: 0; font-size: 13px; box-shadow: 0 5px 0 #0009; }
+  .big:active { transform: translateY(3px); box-shadow: 0 2px 0 #0009; }
+  #vr { background: var(--gold); color: var(--ink); display: none; }
+  body.xr-ok #vr { display: block; }
+  #play { background: #3d7ae0; color: #fff; }
+  body.xr-ok #play { background: #3a2d4b; }
+  #loading { font-size: 10px; color: var(--muted); margin-top: 10px; min-height: 12px; }
+  body.ready #loading { display: none; }
+  body:not(.ready) .big { opacity: .5; pointer-events: none; }
+  details { margin-top: 14px; font-size: 9px; line-height: 1.9; color: var(--muted); }
+  summary { cursor: pointer; color: var(--text); font-size: 10px; }
+  kbd { background: #2b2238; border-radius: 4px; padding: 1px 5px; color: var(--text); }
+  .credit { margin-top: 14px; font-size: 7px; line-height: 1.8; color: #8d82a0; }
+  .credit a { color: var(--muted); }
+
+  /* ---------- in-game overlay (screens only) ---------- */
+  #hud { position: fixed; left: max(10px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); z-index: 5; pointer-events: none; display: none; }
+  #hud canvas { width: min(300px, 46vw); height: auto; display: block; }
+  body.playing:not(.in-xr) #hud { display: block; }
+  #menuBtn { position: fixed; right: max(10px, env(safe-area-inset-right)); top: max(10px, env(safe-area-inset-top)); z-index: 6;
+    width: 44px; height: 44px; border-radius: 12px; border: 3px solid var(--gold); background: var(--panel); display: none; font-size: 14px; }
+  body.playing:not(.in-xr) #menuBtn { display: block; }
+  #toast { position: fixed; left: 50%; top: 18%; transform: translate(-50%, -10px); z-index: 6; opacity: 0; transition: opacity .25s, transform .25s;
+    background: var(--panel); border: 3px solid var(--gold); border-radius: 14px; padding: 12px 18px; font-size: 11px; pointer-events: none; text-align: center; max-width: 90vw; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #toast.big { font-size: 18px; padding: 16px 26px; }
+  body.in-xr #toast { display: none; }
+
+  #pause { position: fixed; inset: 0; display: none; place-items: center; z-index: 20; background: rgba(10,8,16,.55); padding: 16px; }
+  body.paused #pause { display: grid; }
+  #pauseCanvasWrap canvas { width: min(480px, 92vw); height: auto; display: block; cursor: pointer; }
+  #pause .row { justify-content: center; margin-top: 10px; }
+  #pause .row button { padding: 10px 14px; border-radius: 10px; border: 0; background: #3a2d4b; font-size: 10px; }
+
+  /* ---------- touch controls ---------- */
+  #touch { display: none; position: fixed; inset: auto 0 0 0; height: 0; z-index: 7; }
+  @media (pointer: coarse) { body.playing:not(.in-xr):not(.paused) #touch { display: block; } }
+  body.force-touch.playing:not(.in-xr):not(.paused) #touch { display: block; }
+  #pad { position: fixed; left: max(18px, env(safe-area-inset-left)); bottom: max(18px, env(safe-area-inset-bottom)); width: 150px; height: 150px; border-radius: 50%;
+    background: rgba(22,17,34,.45); border: 3px solid rgba(246,211,107,.6); touch-action: none; --kx: 0px; --ky: 0px; }
+  #pad::after { content: ''; position: absolute; left: 50%; top: 50%; width: 62px; height: 62px; border-radius: 50%;
+    background: rgba(246,211,107,.85); transform: translate(calc(-50% + var(--kx)), calc(-50% + var(--ky))); box-shadow: 0 4px 0 #0007; }
+  .tbtn { position: fixed; width: 84px; height: 84px; border-radius: 50%; border: 3px solid rgba(255,255,255,.7); font-size: 11px;
+    background: rgba(22,17,34,.5); color: #fff; touch-action: none; }
+  .tbtn.down { background: rgba(246,211,107,.8); color: var(--ink); }
+  #btnJump { right: max(18px, env(safe-area-inset-right)); bottom: max(28px, env(safe-area-inset-bottom)); }
+  #btnAttack { right: calc(max(18px, env(safe-area-inset-right)) + 96px); bottom: max(70px, calc(env(safe-area-inset-bottom) + 42px)); width: 70px; height: 70px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/three.module.min.js",
+  "three/addons/": "./vendor/three/addons/"
+} }
+</script>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="start">
+  <div class="card">
+    <h1>HAWKTHORNE VR</h1>
+    <p class="sub">The forest levels of Journey to the Center of Hawkthorne, rebuilt as a 3D diorama for Meta Quest &amp; WebXR.</p>
+    <div class="label">PICK YOUR CHARACTER</div>
+    <div id="chars"></div>
+    <div class="row">
+      <button id="vr" class="big">ENTER VR</button>
+      <button id="play" class="big">PLAY ON SCREEN</button>
+    </div>
+    <div id="loading">Loading…</div>
+    <details>
+      <summary>Controls</summary>
+      <b>Quest</b> — Left stick: move · up to climb · down to crouch<br>
+      <kbd>A</kbd>/<kbd>X</kbd> jump · trigger or <kbd>B</kbd>: punch · down + <kbd>A</kbd>: drop through<br>
+      Grip: grab &amp; move the diorama (both grips: pull apart to resize) · right stick: resize<br>
+      <kbd>Y</kbd> menu (point &amp; pull trigger) · left stick click: recenter<br>
+      Left-handed and one-controller layouts are in the menu.<br>
+      <b>Keyboard</b> — <kbd>←→</kbd>/<kbd>AD</kbd> move · <kbd>↑↓</kbd> climb/crouch · <kbd>Space</kbd> jump · <kbd>X</kbd> punch · <kbd>Esc</kbd> menu · <kbd>+</kbd><kbd>-</kbd> zoom<br>
+      <b>Gamepad</b> — stick/d-pad move · A jump · X/B/triggers punch · Start menu<br>
+      <b>Install</b> — in the Quest browser, use the Install option (address bar or ⋯ menu) to add it to your library — it then runs offline and opens straight into VR.
+    </details>
+    <p class="credit">Fan-made port. Based on <a href="https://github.com/hawkthorne/hawkthorne-journey" target="_blank" rel="noopener">Journey to the Center of Hawkthorne</a> by Project Hawkthorne — code MIT, art &amp; audio CC BY-NC 4.0. Not affiliated with NBC or Sony. Non-commercial.</p>
+  </div>
+</div>
+
+<div id="hud"></div>
+<button id="menuBtn" aria-label="Menu">II</button>
+<div id="toast"></div>
+<div id="pause">
+  <div>
+    <div id="pauseCanvasWrap"></div>
+    <div class="row"><button id="resume">RESUME</button><button id="home">TITLE SCREEN</button></div>
+  </div>
+</div>
+<div id="touch">
+  <div id="pad"></div>
+  <button id="btnAttack" class="tbtn">HIT</button>
+  <button id="btnJump" class="tbtn">JUMP</button>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

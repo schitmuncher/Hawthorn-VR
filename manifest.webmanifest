@@ -1,0 +1,19 @@
+{
+  "name": "Hawkthorne VR",
+  "short_name": "Hawkthorne VR",
+  "description": "The forest levels of Journey to the Center of Hawkthorne as a 3D WebXR diorama for Meta Quest.",
+  "id": "./",
+  "start_url": "./?app=1",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#1a1424",
+  "theme_color": "#1a1424",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
