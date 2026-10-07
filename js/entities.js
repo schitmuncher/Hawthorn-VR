@@ -51,7 +51,10 @@ export class Player {
   get centerY() { return this.y + this.bbox.height / 2; }
 
   wallPushback() { this.velocity.x = 0; }
-  floorPushback() { this.jumping = false; this.velocity.y = 0; this.sinceSolid = 0; }
+  floorPushback() {
+    if (this.velocity.y > 300) this.landed = this.velocity.y; // for dust puffs
+    this.jumping = false; this.velocity.y = 0; this.sinceSolid = 0;
+  }
   ceilingPushback() {}
   solidGround() { return this.sinceSolid < G.fallGrace; }
 
@@ -61,7 +64,7 @@ export class Player {
     this.invuln = 1.5; this.hurtTimer = 0.35;
     this.velocity.x = fromX !== undefined ? (this.centerX < fromX ? -260 : 260) : 0;
     this.velocity.y = -260; this.jumping = true;
-    sfx('damage');
+    sfx('damage', 1, 1, { x: this.centerX, y: this.centerY });
     if (this.health <= 0) this.die();
     return true;
   }
@@ -69,7 +72,7 @@ export class Player {
     if (this.dead) return;
     this.dead = true; this.deadTimer = 0; this.health = 0;
     this.velocity.x = 0; this.velocity.y = -300;
-    sfx('death');
+    sfx('death', 1, 1, { x: this.centerX, y: this.centerY });
   }
 
   update(dt, input, world) {
@@ -103,7 +106,7 @@ export class Player {
       else if (input.jumpPressed) {
         this.climbing = null; this.jumping = true; this.velocity.y = G.jump * 0.8;
         this.velocity.x = left ? -G.maxX * 0.6 : right ? G.maxX * 0.6 : 0;
-        sfx('jump');
+        sfx('jump', 0.7, 1, { x: this.centerX, y: this.centerY });
       } else {
         const vy = (input.up ? -1 : 0) + (input.down ? 1 : 0);
         const ny = C.moveY(map, this, this.x, this.y, this.w, this.bbox.height, 0, vy * G.climbSpeed * dt);
@@ -123,6 +126,13 @@ export class Player {
       const dd = this.bbox.height - this.bbox.duck_height;
       if (C.canStand(map, this, this.x, this.y + dd, this.w, this.bbox.duck_height, this.bbox.height)) this.crouching = false;
     }
+    // Auto-crawl: walking into a gap that's only crawl-high ducks you in automatically
+    if (!this.crouching && grounded && (left || right) && !this.climbing) {
+      const d = left ? -3 : 3, dd = this.bbox.height - this.bbox.duck_height, probe = { velocity: { x: 0, y: 0 } };
+      const full = C.moveX(map, probe, this.x, this.y, this.w, this.bbox.height, d);
+      const low = C.moveX(map, probe, this.x, this.y + dd, this.w, this.bbox.duck_height, d);
+      if (Math.abs(low - this.x) > Math.abs(full - this.x) + 1) this.crouching = true;
+    }
     if (input.down && input.jumpPressed && grounded) {
       const below = C.tileAt(map, C.currentTile(map, this.x, this.y, this.w, this.bbox.height + 2));
       if (below !== null && C.platformType(below) === 'oneway') { this.platformDropping = true; this.crouching = false; }
@@ -131,7 +141,8 @@ export class Player {
     // --- Horizontal movement (sonic-style, as in player.lua)
     const accel = this.velocity.y < 0 ? G.airaccel : G.accel;
     const deccel = this.velocity.y < 0 ? G.airaccel : G.deccel;
-    const maxX = G.maxX * (this.crouching ? 0 : analog);
+    // Crouched = crawling: half speed, like the original's crawl state (fits through 1-tile gaps)
+    const maxX = G.maxX * analog * (this.crouching ? 0.45 : 1);
     const stunned = this.hurtTimer > 0.15;
     if (left && !right && !stunned) {
       this.facing = 'left';
@@ -142,7 +153,7 @@ export class Player {
       if (this.velocity.x < 0 && !this.onIce) this.velocity.x += deccel * dt;
       else if (this.velocity.x < maxX) this.velocity.x = Math.min(this.velocity.x + accel * dt, maxX);
     }
-    if ((!left && !right) || this.crouching || Math.abs(this.velocity.x) > maxX) {
+    if ((!left && !right) || Math.abs(this.velocity.x) > maxX) {
       const f = G.friction * (this.onIce ? 0.1 : 1) * dt;
       this.velocity.x = this.velocity.x < 0 ? Math.min(this.velocity.x + f, 0) : Math.max(this.velocity.x - f, 0);
     }
@@ -159,7 +170,7 @@ export class Player {
         this.crouching = false;
         this.jumping = true;
         this.velocity.y = inWater ? -270 : G.jump;
-        sfx('jump', 0.7);
+        sfx('jump', 0.7, 1, { x: this.centerX, y: this.centerY });
       }
     }
     if (!input.jumpHeld && this.jumping && this.velocity.y < G.halfJump) this.velocity.y = G.halfJump;
@@ -170,7 +181,7 @@ export class Player {
     if (this.attackBuffer > 0 && this.attackCooldown <= 0) {
       this.attackBuffer = 0;
       this.attackTimer = 0.22; this.attackCooldown = 0.3;
-      sfx('punch', 0.7);
+      sfx('punch', 0.7, 1, { x: this.centerX, y: this.centerY });
       world.playerAttack(this.attackBox());
     }
 
@@ -193,7 +204,7 @@ export class Player {
     if (this.hurtTimer > 0) st = 'hurt';
     else if (this.attackTimer > 0) st = this.jumping ? 'attackjump' : moving ? 'attackwalk' : 'attack';
     else if (this.jumping || !this.solidGround()) st = 'jump';
-    else if (this.crouching) st = moving ? 'crouchwalk' : 'crouch';
+    else if (this.crouching) st = moving ? 'crawlwalk' : (input.down ? 'crouch' : 'crawlidle');
     else if (moving) st = 'walk';
     else if (input.up) st = 'gaze';
     else st = 'idle';
@@ -268,6 +279,7 @@ export class Enemy {
     this.delay = Math.random() * 2;
     this.minX = this.x - 24; this.maxX = this.x + 24;
   }
+  get at() { return { x: this.x + this.def.w / 2, y: this.y + this.def.h / 2 }; }
   get box() {
     const d = this.def;
     return { x: this.x + d.w / 2 - d.bbw / 2, y: this.y + d.h / 2 - d.bbh / 2, w: d.bbw, h: d.bbh };
@@ -281,7 +293,7 @@ export class Enemy {
     this.hp -= 1;
     if (this.hp <= 0) {
       this.dying = 0.75; this.setState('dying');
-      sfx(this.def.die || 'hit');
+      sfx(this.def.die || 'hit', 1, 1, this.at);
       world.burst(this.box, 0xffffff, 6);
     }
   }
@@ -304,7 +316,7 @@ export class Enemy {
           this.velocity.x = Math.sign(pdx) * d.speed * 4;
           if (this.stateTime > 4) { this.setState('default'); this.minX = this.x - 24; this.maxX = this.x + 24; }
         } else {
-          if (Math.abs(pdx) < 80 && Math.abs(pdy) < 36 && !p.dead) { this.setState('attack'); sfx('acorn_growl', 0.6); }
+          if (Math.abs(pdx) < 80 && Math.abs(pdy) < 36 && !p.dead) { this.setState('attack'); sfx('acorn_growl', 0.6, 1, this.at); }
           if (this.x <= this.minX || this.bumped) this.facing = 'right';
           else if (this.x >= this.maxX) this.facing = 'left';
           this.velocity.x = (this.facing === 'right' ? 1 : -1) * d.speed;
@@ -319,7 +331,7 @@ export class Enemy {
       }
       case 'bat': {
         if (this.state === 'default') {
-          if (Math.abs(pdx) < 75 && pdy > 0 && pdy < 220 && !p.dead) { this.setState('dive'); this.fly = Math.sign(pdx) || 1; sfx('bat_attack', 0.6); }
+          if (Math.abs(pdx) < 75 && pdy > 0 && pdy < 220 && !p.dead) { this.setState('dive'); this.fly = Math.sign(pdx) || 1; sfx('bat_attack', 0.6, 1, this.at); }
         } else if (this.state === 'dive') {
           this.x += this.fly * 150 * 0.5 * dt; this.y += 150 * dt;
           if (this.stateTime > 0.9 || pdy < -10) this.setState('flying');
@@ -414,7 +426,7 @@ export class Breakable {
       const frames = 3, f = Math.min(frames - 1, Math.floor((1 - this.hp / this.maxHp) * frames));
       this.sprite.setRect(f * this.w, 0, this.w, this.h);
     }
-    sfx(this.hp <= 0 ? 'boulder-crumble' : 'hit', 0.8);
+    sfx(this.hp <= 0 ? 'boulder-crumble' : 'hit', 0.8, 1, { x: this.x + this.w / 2, y: this.y + this.h / 2 });
     if (this.hp <= 0) {
       this.broken = true;
       for (let yy = 0; yy < this.h; yy += 24) for (let xx = 0; xx < this.w; xx += 24) C.setTile(this.map, this.x + xx + 1, this.y + yy + 1, -1);
@@ -456,7 +468,7 @@ export class Pickup {
     this.sprite.place(this.x, this.y + Math.sin(this.t * 2.5) * 2, 2);
     this.sprite.group.rotation.y = Math.sin(this.t * 1.2) * 0.6;
   }
-  take() { this.taken = true; this.fly = 0.4; sfx('pickup', 0.7); }
+  take() { this.taken = true; this.fly = 0.4; sfx('pickup', 0.7, 1, { x: this.x + 12, y: this.y + 12 }); }
 }
 
 // ---------------------------------------------------------------- Liquids (animated water/waterfalls)
@@ -523,7 +535,7 @@ export class Sign {
     g.strokeStyle = '#f6d36b'; g.lineWidth = 1.5; g.stroke();
     g.fillStyle = '#fff'; g.font = 'bold 10px "Press Start 2P", ui-monospace, monospace'; g.textBaseline = 'top';
     lines.forEach((l, i) => g.fillText(l, 8, 8 + i * lh));
-    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
     this.panel = new THREE.Mesh(new THREE.PlaneGeometry(220 * 0.6, cv.height / scale * 0.6),
       new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false }));
     this.panel.renderOrder = 100;

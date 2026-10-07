@@ -3,16 +3,18 @@ import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFa
 import { World } from './world.js';
 import * as Input from './input.js';
 import * as Audio from './audio.js';
-import { Hud } from './hud.js';
+import { Hud, UI } from './hud.js';
 import { Menu } from './menu.js';
 import { loadImage } from './level.js';
+import { Environment } from './env.js';
+import { MixedReality } from './mr.js';
 
 // ------------------------------------------------------------------ settings
 const params = new URLSearchParams(location.search);
 const saved = JSON.parse(localStorageGet('hawkvr-settings') || '{}');
 export const settings = Object.assign({
   character: 'abed', scheme: 'classic', scale: 1, flatZoom: 1, distance: 1.35, height: -0.18,
-  follow: 'smooth', vignette: true, music: 0.45, sfx: 0.8, haptics: true,
+  follow: 'smooth', vignette: true, music: 0.45, sfx: 0.8, haptics: true, quality: 'high', shadows: true,
 }, saved);
 if (params.get('char')) settings.character = params.get('char');
 export function saveSettings() { localStorageSet('hawkvr-settings', JSON.stringify(settings)); }
@@ -20,13 +22,16 @@ function localStorageGet(k) { try { return localStorage.getItem(k); } catch (e) 
 function localStorageSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
 // ------------------------------------------------------------------ renderer & scene
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.xr.enabled = true;
 renderer.xr.setReferenceSpaceType('local-floor');
-renderer.xr.setFoveation(0.5);
+// Sharper image on Quest: render a bit above the default eye-buffer size, light foveation only
+renderer.xr.setFramebufferScaleFactor(settings.quality === 'high' ? 1.4 : 1.0);
+renderer.xr.setFoveation(0.25);
+UI.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 document.getElementById('game').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -37,6 +42,9 @@ const skyColor = new THREE.Color(0x73def9);
 scene.fog = new THREE.Fog(skyColor, 2.6, 7.5);
 const sky = makeSky();
 scene.add(sky);
+const env = new Environment(scene);
+env.group.visible = false;
+const mainFog = scene.fog;
 
 // The anchor is where the diorama lives in the room; the stage inside it scrolls to follow the player.
 const anchor = new THREE.Group();
@@ -44,6 +52,9 @@ scene.add(anchor);
 const stage = new THREE.Group();
 anchor.add(stage);
 const BASE_SCALE = 1.25 / 528; // metres per game pixel: 22 tiles ~ 1.25 m tall
+const mr = new MixedReality(renderer, scene, anchor, stage);
+const WINDOW = { w: 2.0, h: 1.25 };
+let xrMode = null; // 'vr' | 'mr' while in a headset session
 
 // HUD and menus float in the room next to the diorama (never head-locked)
 const hud = new Hud();
@@ -77,8 +88,20 @@ const hands = {}; // handedness -> { grip, ray, line }
 const xrState = { session: null, sources: [], dragging: null };
 renderer.xr.addEventListener('sessionstart', () => {
   xrState.session = renderer.xr.getSession();
-  xrState.needsRecenter = true;
+  xrMode = xrMode || 'vr';
   document.body.classList.add('in-xr');
+  document.body.classList.toggle('in-mr', xrMode === 'mr');
+  if (xrMode === 'mr') {
+    // Passthrough: no sky, no fog, transparent clear; the window/table placement takes over
+    sky.visible = false; env.group.visible = false; scene.fog = null;
+    renderer.setClearColor(0x000000, 0);
+    mr.buildWindow(WINDOW.w * settings.scale, WINDOW.h * settings.scale, skyColor);
+    mr.start(xrState.session);
+    hud.toast('Point at a wall or table, pull the trigger', 6);
+  } else {
+    xrState.needsRecenter = true;
+    env.group.visible = true;
+  }
   menu.build();
   applyView();
   hud.showHints(settings.scheme, 14);
@@ -90,11 +113,15 @@ renderer.xr.addEventListener('sessionstart', () => {
   // Pause when the Quest system menu / guardian takes over
   xrState.session.addEventListener('visibilitychange', e => { if (e.session.visibilityState !== 'visible' && !paused) setPaused(true); });
   const ref = renderer.xr.getReferenceSpace();
-  if (ref && ref.addEventListener) ref.addEventListener('reset', () => { xrState.needsRecenter = true; });
+  if (ref && ref.addEventListener) ref.addEventListener('reset', () => { if (xrMode !== 'mr') xrState.needsRecenter = true; });
 });
 renderer.xr.addEventListener('sessionend', () => {
   xrState.session = null; xrState.sources = [];
-  document.body.classList.remove('in-xr');
+  document.body.classList.remove('in-xr', 'in-mr');
+  if (xrMode === 'mr') mr.stop();
+  xrMode = null;
+  sky.visible = true; env.group.visible = false; scene.fog = mainFog; anchor.visible = true;
+  renderer.setClearColor(skyColor, 1); renderer.clippingPlanes = [];
   anchor.position.set(0, 0, 0); anchor.rotation.set(0, 0, 0);
   menu.build();
   setPaused(false);
@@ -147,20 +174,37 @@ async function boot() {
   Audio.preload(['jump', 'punch', 'hit', 'pickup', 'damage', 'acorn_crush']);
   buildCharacterPicker();
   if (params.has('vrpreview')) hud.showHints(settings.scheme, 600);
+  if (params.has('mrpreview')) {
+    // Debug: fake passthrough room with the game hung on a wall (or stood on a table)
+    xrMode = 'mr'; sky.visible = false; scene.fog = null; renderer.setClearColor(0x6b6f76, 1);
+    const table = params.get('mrpreview') === 'table';
+    mr.buildWindow(WINDOW.w * settings.scale, WINDOW.h * settings.scale, skyColor);
+    mr.place(table ? { pos: new THREE.Vector3(0, 0.75, -1.0), normal: new THREE.Vector3(0, 1, 0), wall: false }
+                   : { pos: new THREE.Vector3(0, 1.45, -1.9), normal: new THREE.Vector3(0, 0, 1), wall: true });
+    hud.showHints(settings.scheme, 600);
+  }
   document.body.classList.add('ready');
 }
 
 function onLevelLoaded() {
   skyColor.copy(world.level.sky);
-  scene.fog.color.copy(skyColor);
+  if (mainFog) mainFog.color.copy(skyColor);
   sky.material.uniforms.horizon.value.copy(skyColor);
-  renderer.setClearColor(skyColor);
+  renderer.setClearColor(skyColor, xrMode === 'mr' ? 0 : 1);
+  mr.setSky(skyColor);
+  env.setLevel(world.level.data);
   follow.ready = false;
 }
 
-const vrLike = () => !!xrState.session || params.has('vrpreview');
-const stageScale = () => BASE_SCALE * (vrLike() ? settings.scale : 1);
+const vrLike = () => !!xrState.session || params.has('vrpreview') || params.has('mrpreview');
+// How big the level is in each mode (metres per game pixel)
+function modeFactor() {
+  if (xrMode === 'mr') return mr.mode === 'table' ? 0.46 : (WINDOW.h * 1.12) / 1.25;
+  return 1;
+}
+const stageScale = () => BASE_SCALE * (vrLike() ? settings.scale * modeFactor() : 1);
 function viewDistancePx() {
+  if (xrMode === 'mr') return (mr.mode === 'window' ? 1.8 : 1.0) / stageScale();
   return (vrLike() ? settings.distance : flatDistance()) / stageScale();
 }
 function flatDistance() {
@@ -169,22 +213,35 @@ function flatDistance() {
   const visH = 360 * aspectBoost / settings.flatZoom * BASE_SCALE;
   return visH / 2 / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
 }
+// Where panels sit relative to the anchor, and how the stage is offset inside it
+function layout() {
+  const s = stageScale(), levelH = world && world.level ? Math.min(world.pixelH, 560) * s : 1.25;
+  if (xrMode === 'mr' && mr.mode === 'window') return { top: WINDOW.h * settings.scale / 2 + 0.06, stageZ: -0.26, lift: 0 };
+  if (xrMode === 'mr' && mr.mode === 'table') return { top: levelH + 0.05, stageZ: 0, lift: levelH / 2 + 24 * s };
+  return { top: levelH * 0.5, stageZ: 0, lift: 0 };
+}
 function applyView() {
   const s = stageScale();
   stage.scale.setScalar(s);
   if (world && world.level) world.level.setViewDistance(viewDistancePx());
-  // Panels sit above the diorama
-  const top = world && world.level ? Math.min(world.pixelH, 560) * s * 0.5 : 0.65;
-  hud.mesh.position.set(-0.42, top + 0.12, 0.05);
-  hud.toastMesh.position.set(0, top + 0.02, 0.12);
-  hud.hintMesh.position.set(0.42, top + 0.16, 0.05);
-  menu.mesh.position.set(0, 0.02, 0.35);
-  if (params.has('vrpreview') && !xrState.session) {
+  const L = layout();
+  const spread = xrMode === 'mr' && mr.mode === 'window' ? WINDOW.w * settings.scale / 2 - 0.2 : 0.44;
+  hud.mesh.position.set(-spread, L.top + 0.1, 0.08);
+  hud.toastMesh.position.set(0, L.top + 0.02, 0.14);
+  hud.hintMesh.position.set(spread, L.top + 0.15, 0.08);
+  menu.mesh.position.set(0, xrMode === 'mr' ? L.top - 0.3 : 0.02, 0.35);
+  if (xrMode === 'mr') mr.buildWindow(WINDOW.w * settings.scale, WINDOW.h * settings.scale, skyColor);
+  if (params.has('mrpreview') && !xrState.session) {
+    camera.fov = 90; camera.updateProjectionMatrix();
+    camera.position.set(0.25, 1.6, 0); camera.lookAt(0, mr.mode === 'table' ? 0.9 : 1.45, -1.5);
+    hud.mesh.visible = true; hud.toastMesh.visible = true;
+  } else if (params.has('vrpreview') && !xrState.session) {
     // Debug: approximate what a Quest user sees (wide FOV, diorama at arm's length)
     camera.fov = 90; camera.updateProjectionMatrix();
-    anchor.position.set(0, settings.height, -settings.distance);
-    camera.position.set(0, 0, 0); camera.lookAt(0, settings.height * 0.8, -1);
+    camera.position.set(0, 1.6, 0); camera.lookAt(0, 1.6 + settings.height * 0.8, -1);
+    anchor.position.set(0, 1.6 + settings.height, -settings.distance);
     hud.mesh.visible = true; hud.toastMesh.visible = true;
+    env.group.visible = true;
   } else if (!xrState.session) {
     hud.mesh.visible = false; hud.toastMesh.visible = false;
     camera.position.set(0, 0.03, flatDistance());
@@ -218,6 +275,8 @@ function onMenuAction(action, value) {
       if (settings.scheme !== lastScheme) { lastScheme = settings.scheme; hud.showHints(settings.scheme, 10); }
       break;
     case 'hints': hud.showHints(settings.scheme, 12); setPaused(false); break;
+    case 'toast': hud.toast(value, 2.5); break;
+    case 'place': setPaused(false); mr.beginPlacing(); hud.toast('Point at a wall or table, pull the trigger', 4); break;
     case 'restart': world.respawn(); setPaused(false); break;
     case 'exitvr': setPaused(false); xrState.session && xrState.session.end(); break;
   }
@@ -238,6 +297,18 @@ function setPaused(p) {
   if (p) menu.refresh();
 }
 
+// Positional sound: game positions -> room positions, listener follows your head
+Audio.spatial.toWorld = (x, y) => stage.localToWorld(new THREE.Vector3(x, -y, 0));
+const _lp = new THREE.Vector3(), _lf = new THREE.Vector3(), _lu = new THREE.Vector3(), _lq = new THREE.Quaternion();
+function updateListener() {
+  Audio.spatial.enabled = !!xrState.session;
+  if (!xrState.session) return;
+  const cam = renderer.xr.getCamera();
+  cam.getWorldPosition(_lp); cam.getWorldQuaternion(_lq);
+  _lf.set(0, 0, -1).applyQuaternion(_lq); _lu.set(0, 1, 0).applyQuaternion(_lq);
+  Audio.setListener(_lp, _lf, _lu);
+}
+
 // ------------------------------------------------------------------ main loop
 const clock = new THREE.Clock();
 renderer.setAnimationLoop((t, frame) => {
@@ -253,9 +324,17 @@ renderer.setAnimationLoop((t, frame) => {
   if (!world || !world.level) { renderer.render(scene, camera); return; }
 
   if (input.pausePressed) setPaused(!paused);
-  if (input.recenterPressed && xrState.session) recenter();
+  if (input.recenterPressed && xrState.session && xrMode !== 'mr') recenter();
 
-  if (paused) {
+  const actionHand = settings.scheme === 'lefty' ? 'left' : 'right';
+  if (xrMode === 'mr' && mr.placing) {
+    const before = mr.mode;
+    const done = mr.update(frame, renderer.xr.getReferenceSpace(), xrState.sources,
+      input.xr && (input.xr.triggerPressed[actionHand] || input.xr.triggerPressed[leftHand()]) || input.jumpPressed, actionHand,
+      { w: WINDOW.w * settings.scale, h: WINDOW.h * settings.scale });
+    if (mr.mode !== before || done) { applyView(); follow.ready = false; }
+    if (done) { haptic(null, 0.5, 60); hud.showHints(settings.scheme, 12); hud.toast(mr.mode === 'window' ? 'Window placed' : 'Placed on the table', 1.5); }
+  } else if (paused) {
     menu.update(dt, input);
   } else if (!transition) {
     // Zoom (right stick up/down in VR, +/- on keyboard)
@@ -281,6 +360,9 @@ renderer.setAnimationLoop((t, frame) => {
   hud.update(dt, world, settings);
   menu.mesh.visible = paused && !!xrState.session;
   updateVignette(dt);
+  updateListener();
+  world.shadowsOn = settings.shadows;
+  if (env.group.visible) env.update(dt, anchor, world.pixelW ? Math.min(3, 2.2 * settings.scale) : 2);
   renderer.render(scene, camera);
 });
 let zoomSaveTimer = 0;
@@ -348,11 +430,31 @@ function updateFollow(dt) {
   follow.vx = (nx - follow.x) / Math.max(dt, 1e-4);
   follow.x = nx;
   follow.y = THREE.MathUtils.damp(follow.y, ty, 3, dt);
-  stage.position.set(-follow.x * s, follow.y * s, 0);
+  const L = layout();
+  stage.position.set(-follow.x * s, follow.y * s + L.lift, L.stageZ);
+  updateTableClip();
+}
+
+// Table mode: trim the endless level strip to a tabletop-sized slice
+const tablePlanes = [new THREE.Plane(), new THREE.Plane()];
+let clipFrame = 0;
+function updateTableClip() {
+  const on = xrMode === 'mr' && mr.mode === 'table';
+  renderer.localClippingEnabled = on;
+  if (!on) { if (clipFrame) { stage.traverse(o => { if (o.material && o.material.clippingPlanes) o.material.clippingPlanes = null; }); clipFrame = 0; } return; }
+  const hw = 0.75 * settings.scale;
+  const xAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(anchor.quaternion);
+  const a = anchor.position;
+  tablePlanes[0].setFromNormalAndCoplanarPoint(xAxis, a.clone().addScaledVector(xAxis, -hw));
+  tablePlanes[1].setFromNormalAndCoplanarPoint(xAxis.clone().negate(), a.clone().addScaledVector(xAxis, hw));
+  if (clipFrame++ % 30 === 0) stage.traverse(o => {
+    if (!o.material) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) if (m.clippingPlanes !== tablePlanes) { m.clippingPlanes = tablePlanes; m.needsUpdate = true; }
+  });
 }
 
 function updateVignette(dt) {
-  const on = !!xrState.session && settings.vignette;
+  const on = !!xrState.session && settings.vignette && xrMode !== 'mr';
   const speed = Math.abs(follow.vx * stage.scale.x); // metres per second the world slides
   const target = on ? THREE.MathUtils.clamp((speed - 0.12) * 1.4, 0, 0.75) : 0;
   vignette.material.uniforms.strength.value = THREE.MathUtils.damp(vignette.material.uniforms.strength.value, target, 6, dt);
@@ -362,7 +464,7 @@ function updateVignette(dt) {
 // Hold a grip to grab the diorama and move it; hold both grips and pull apart to scale.
 const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
 function handleGrabDrag(input) {
-  if (!xrState.session || !input.xr || paused || settings.scheme === 'onehand') { xrState.dragging = null; return; }
+  if (!xrState.session || !input.xr || paused || settings.scheme === 'onehand' || (xrMode === 'mr' && (mr.mode === 'window' || mr.placing))) { xrState.dragging = null; return; }
   const held = Object.values(hands).filter(h => input.xr.grips[h.hand]).map(h => h.grip);
   if (!held.length) { xrState.dragging = null; return; }
   const positions = held.map(g => g.getWorldPosition(new THREE.Vector3()));
@@ -444,6 +546,8 @@ $('#play').onclick = () => { Audio.unlock(); Audio.setVolumes(settings.music, se
 async function enterVR(quiet) {
   Audio.unlock(); Audio.setVolumes(settings.music, settings.sfx);
   try {
+    xrMode = 'vr';
+    renderer.xr.setFramebufferScaleFactor(settings.quality === 'high' ? 1.4 : 1.0);
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
     await renderer.xr.setSession(session);
     document.body.classList.add('playing');
@@ -451,6 +555,17 @@ async function enterVR(quiet) {
   } catch (e) { if (!quiet) domToast('Could not start VR: ' + e.message); return false; }
 }
 $('#vr').onclick = () => enterVR(false);
+$('#mr').onclick = async () => {
+  Audio.unlock(); Audio.setVolumes(settings.music, settings.sfx);
+  try {
+    xrMode = 'mr';
+    renderer.xr.setFramebufferScaleFactor(settings.quality === 'high' ? 1.4 : 1.0);
+    const session = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['local-floor', 'hit-test', 'plane-detection', 'anchors', 'hand-tracking'] });
+    await renderer.xr.setSession(session);
+    document.body.classList.add('playing');
+  } catch (e) { xrMode = null; domToast('Could not start mixed reality: ' + e.message); }
+};
+if (navigator.xr) navigator.xr.isSessionSupported('immersive-ar').then(ok => { if (ok) document.body.classList.add('mr-ok'); }).catch(() => {});
 
 // Installed as an app on Quest: go straight into VR (falls back to the title screen if the browser wants a tap first)
 const launchedAsApp = params.has('app') || matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches;

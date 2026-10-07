@@ -45,6 +45,8 @@
   .big:active { transform: translateY(3px); box-shadow: 0 2px 0 #0009; }
   #vr { background: var(--gold); color: var(--ink); display: none; }
   body.xr-ok #vr { display: block; }
+  #mr { background: #5fd36b; color: var(--ink); display: none; }
+  body.mr-ok #mr { display: block; }
   #play { background: #3d7ae0; color: #fff; }
   body.xr-ok #play { background: #3a2d4b; }
   #loading { font-size: 10px; color: var(--muted); margin-top: 10px; min-height: 12px; }
@@ -107,6 +109,7 @@
     <div id="chars"></div>
     <div class="row">
       <button id="vr" class="big">ENTER VR</button>
+      <button id="mr" class="big">MIXED REALITY</button>
       <button id="play" class="big">PLAY ON SCREEN</button>
     </div>
     <div id="loading">Loading…</div>
@@ -117,6 +120,7 @@
       Grip: grab &amp; move the diorama (both grips: pull apart to resize) · right stick: resize<br>
       <kbd>Y</kbd> menu (point &amp; pull trigger) · left stick click: recenter<br>
       Left-handed and one-controller layouts are in the menu.<br>
+      <b>Mixed reality</b> — point at a wall to hang the game as a window, or at a table to stand it there; pull the trigger to place. Move it again from the menu.<br>
       <b>Keyboard</b> — <kbd>←→</kbd>/<kbd>AD</kbd> move · <kbd>↑↓</kbd> climb/crouch · <kbd>Space</kbd> jump · <kbd>X</kbd> punch · <kbd>Esc</kbd> menu · <kbd>+</kbd><kbd>-</kbd> zoom<br>
       <b>Gamepad</b> — stick/d-pad move · A jump · X/B/triggers punch · Start menu<br>
       <b>Install</b> — in the Quest browser, use the Install option (address bar or ⋯ menu) to add it to your library — it then runs offline and opens straight into VR.
