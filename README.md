@@ -34,9 +34,9 @@ Pick **immersive** as the app mode during `init`.
 
 ## Mixed reality (Quest 3 passthrough)
 
-Press **MIXED REALITY** on the title screen. Point a controller at a **wall** and pull the trigger to hang the game
-there as a window into the forest, or at a **table / floor** to stand the diorama on it. The game follows your
-pointer until you place it. Use **Move game** in the menu (Y) to put it somewhere else. Walls and tables are found
+Press **MIXED REALITY** on the title screen. The game follows your pointer (stick up/down sets the distance) until
+you pull the trigger to place it. **B** switches between a **window** and a **tabletop diorama**; **A** turns on
+snapping to detected walls/tables (off by default). Use **Move game** in the menu (Y) to put it somewhere else. Walls and tables are found
 from your Quest's room setup; if none are detected it floats in front of you instead.
 
 ## Controls

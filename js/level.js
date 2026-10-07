@@ -262,41 +262,6 @@ export async function buildLevel(data, opts = {}) {
     }
   });
 
-  // --- Bottomless pits: a dark gradient falls away inside them so a drop never looks like solid floor
-  {
-    const cv = document.createElement('canvas'); cv.width = 1; cv.height = 128;
-    const g = cv.getContext('2d'), grad = g.createLinearGradient(0, 0, 0, 128);
-    grad.addColorStop(0, 'rgba(8,4,18,0.0)'); grad.addColorStop(0.12, 'rgba(8,4,18,0.45)');
-    grad.addColorStop(0.45, 'rgba(8,4,18,0.88)'); grad.addColorStop(1, 'rgba(8,4,18,0.97)');
-    g.fillStyle = grad; g.fillRect(0, 0, 1, 128);
-    const tex = new THREE.CanvasTexture(cv);
-    const solidOrPlatform = (c, r) => fill[r * W + c] || map.coll[r * W + c] >= 0;
-    const pitTop = new Int32Array(W).fill(-1);
-    for (let c = 0; c < W; c++) {
-      if (solidOrPlatform(c, H - 1)) continue;
-      let r0 = H - 1;
-      while (r0 > 0 && !solidOrPlatform(c, r0 - 1)) r0--;
-      if (r0 > H - 4) continue; // ground that simply ends near the bottom edge isn't a pit
-      // Only real pits: the column must have ground somewhere above-ish nearby (not open sky edges of the map)
-      pitTop[c] = Math.max(r0, 1);
-    }
-    const pits = new Batch();
-    for (let c = 0; c < W;) {
-      if (pitTop[c] < 0) { c++; continue; }
-      // Start the gradient level with the lower of the neighbouring ledges
-      let c1 = c; while (c1 + 1 < W && pitTop[c1 + 1] >= 0) c1++;
-      const left = c > 0 ? groundTop(c - 1) : null, right = c1 + 1 < W ? groundTop(c1 + 1) : null;
-      const ledge = Math.max(left ?? 0, right ?? 0, Math.min(...Array.from({ length: c1 - c + 1 }, (_, k) => pitTop[c + k])) * th - 3 * th);
-      const top = Math.max(ledge, 0) + th * 0.5, bottom = H * th + th * 4;
-      const x0 = c * tw, x1 = (c1 + 1) * tw;
-      pits.quad([[x0, -bottom, -3], [x1, -bottom, -3], [x1, -top, -3], [x0, -top, -3]], [[0, 0], [1, 0], [1, 1], [0, 1]], 1);
-      c = c1 + 1;
-    }
-    function groundTop(c) { for (let r = 0; r < H; r++) if (solidOrPlatform(c, r)) return r * th; return null; }
-    const pm = pits.build(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
-    if (pm) { pm.name = 'pits'; pm.renderOrder = 5; root.add(pm); }
-  }
-
   // --- Parallax layers become real depth planes
   const parallaxGroups = [];
   const offsetTiles = +(data.properties.offset || 0);

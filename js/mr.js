@@ -56,8 +56,9 @@ export class MixedReality {
     const lft = add(new THREE.PlaneGeometry(D, h), reveal, -w / 2, 0, -D / 2, 0); lft.rotation.y = Math.PI / 2;
     const rgt = add(new THREE.PlaneGeometry(D, h), reveal, w / 2, 0, -D / 2, 0); rgt.rotation.y = -Math.PI / 2;
     // Sky backdrop far behind the wall (only visible through the hole)
-    this.skyMat = new THREE.MeshBasicMaterial({ color: skyColor, fog: false });
-    add(new THREE.PlaneGeometry(40, 30), this.skyMat, 0, 0, -6, -50);
+    // Backdrop: sky that deepens towards the bottom, so gaps in the level read as depth, not holes
+    this.skyMat = backdropMaterial(skyColor);
+    add(new THREE.PlaneGeometry(14, 10), this.skyMat, 0, 0, -3.5, -50);
     // Frame on the wall
     const frameMat = new THREE.MeshBasicMaterial({ color: 0x4a3a60 });
     const trim = new THREE.MeshBasicMaterial({ color: 0xf6d36b });
@@ -73,7 +74,47 @@ export class MixedReality {
     add(new THREE.BoxGeometry(tt, h, fd + 0.004), trim, w / 2 - tt / 2, 0, fd / 2, 2);
   }
 
-  setSky(color) { if (this.skyMat) this.skyMat.color.copy(color); }
+  setSky(color) {
+    if (this.skyMat) this.skyMat.uniforms.sky.value.copy(color);
+    if (this.boxSky) this.boxSky.uniforms.sky.value.copy(color);
+  }
+
+  // Diorama on a table: a proper little set with a ground base and a sky backdrop,
+  // so you never see the real table through gaps in the level.
+  buildDiorama({ width, depth, front, height, groundImage, skyColor }) {
+    const key = [width, depth, front, height].map(v => v.toFixed(3)).join('x') + (groundImage ? 'g' : '');
+    if (!this.box) { this.box = new THREE.Group(); this.box.name = 'diorama-box'; this.anchor.add(this.box); }
+    if (this.boxKey === key) return;
+    this.boxKey = key;
+    const g = this.box;
+    while (g.children.length) { const c = g.children.pop(); c.geometry && c.geometry.dispose(); }
+    const t = 0.03; // base thickness
+    let groundMat;
+    if (groundImage) {
+      const tex = new THREE.Texture(groundImage);
+      tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
+      tex.repeat.set(width / 0.06, depth / 0.06); tex.needsUpdate = true;
+      groundMat = new THREE.MeshBasicMaterial({ map: tex, color: 0x9a90aa });
+    } else groundMat = new THREE.MeshBasicMaterial({ color: 0x5a4a6e });
+    const sideMat = new THREE.MeshBasicMaterial({ color: 0x2c2238 });
+    const back = -depth + front;
+    // Ground slab (top = table surface + tiny lift)
+    const top = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), groundMat);
+    top.rotation.x = -Math.PI / 2; top.position.set(0, 0.001, (front + back) / 2); g.add(top);
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(width, t, depth), sideMat);
+    slab.position.set(0, -t / 2, (front + back) / 2); g.add(slab);
+    // Gold trim along the front edge
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(width, 0.006, 0.006), new THREE.MeshBasicMaterial({ color: 0xf6d36b }));
+    trim.position.set(0, 0.001, front); g.add(trim);
+    // Sky backdrop
+    this.boxSky = backdropMaterial(skyColor);
+    const sky = new THREE.Mesh(new THREE.PlaneGeometry(width, height), this.boxSky);
+    sky.position.set(0, height / 2, back); g.add(sky);
+    const skyBack = new THREE.Mesh(new THREE.PlaneGeometry(width, height), sideMat);
+    skyBack.rotation.y = Math.PI; skyBack.position.set(0, height / 2, back - 0.002); g.add(skyBack);
+  }
+  showDiorama(on) { if (this.box) this.box.visible = on; }
 
   async start(session) {
     this.active = true; this.placing = true;
@@ -180,4 +221,20 @@ export class MixedReality {
     this.anchor.rotation.set(0, yaw, 0);
     this.window.visible = wall;
   }
+}
+
+// Vertical gradient: sky at the top, darker and earthier towards the bottom
+function backdropMaterial(sky) {
+  return new THREE.ShaderMaterial({
+    uniforms: { sky: { value: sky.clone() } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: `uniform vec3 sky; varying vec2 vUv;
+      void main(){
+        vec3 top = sky * vec3(0.75, 0.85, 1.0);
+        vec3 low = sky * vec3(0.32, 0.34, 0.45);
+        vec3 c = mix(low, mix(sky, top, smoothstep(0.6, 1.0, vUv.y)), smoothstep(0.05, 0.55, vUv.y));
+        gl_FragColor = vec4(c, 1.0);
+        #include <colorspace_fragment>
+      }`,
+  });
 }

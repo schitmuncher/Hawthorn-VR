@@ -15,8 +15,11 @@ const saved = JSON.parse(localStorageGet('hawkvr-settings') || '{}');
 export const settings = Object.assign({
   character: 'abed', scheme: 'classic', scale: 1, flatZoom: 1, distance: 1.35, height: -0.18,
   follow: 'smooth', vignette: true, music: 0.45, sfx: 0.8, haptics: true, quality: 'high', shadows: true,
-  winW: 2.0, winH: 1.25, winOffset: 0, winDepth: 0.26, winLift: 0, mrStyle: 'window', mrSnap: true, mrDist: 1.5,
+  winW: 2.0, winH: 1.25, winOffset: 0, winDepth: 0.26, winLift: 0, mrStyle: 'window', mrSnap: false, mrDist: 1.5,
 }, saved);
+// Settings migrations
+if ((saved.v || 0) < 2) { settings.mrSnap = false; } // free placement is the default now
+settings.v = 2;
 if (params.get('char')) settings.character = params.get('char');
 export function saveSettings() { localStorageSet('hawkvr-settings', JSON.stringify(settings)); }
 function localStorageGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -207,7 +210,7 @@ function modeFactor() {
 }
 const stageScale = () => BASE_SCALE * (vrLike() ? settings.scale * modeFactor() : 1);
 function viewDistancePx() {
-  if (xrMode === 'mr') return (mr.mode === 'window' ? 1.8 : 1.0) / stageScale();
+  if (xrMode === 'mr') return (mr.mode === 'window' ? 1.8 : 0.3 * settings.scale) / stageScale();
   return (vrLike() ? settings.distance : flatDistance()) / stageScale();
 }
 function flatDistance() {
@@ -219,7 +222,11 @@ function flatDistance() {
 // Where panels sit relative to the anchor, and how the stage is offset inside it
 function layout() {
   const s = stageScale(), levelH = world && world.level ? Math.min(world.pixelH, 560) * s : 1.25;
-  if (xrMode === 'mr' && mr.mode === 'window') return { top: settings.winH / 2 + 0.06, stageZ: -settings.winDepth, lift: 0 };
+  if (xrMode === 'mr' && mr.mode === 'window') {
+    // Sit the level's ground on the window sill (tucked just below it) so there's no empty gap under the world
+    const lift = world && world.level ? -settings.winH / 2 - 0.06 + (world.pixelH / 2 + 24) * s : 0;
+    return { top: settings.winH / 2 + 0.06, stageZ: -settings.winDepth, lift };
+  }
   if (xrMode === 'mr' && mr.mode === 'table') return { top: levelH + 0.05, stageZ: 0, lift: levelH / 2 + 24 * s };
   return { top: levelH * 0.5, stageZ: 0, lift: 0 };
 }
@@ -241,7 +248,17 @@ function applyView() {
   hud.toastMesh.position.set(0, L.top + 0.02, 0.14);
   hud.hintMesh.position.set(spread, L.top + 0.15, 0.08);
   menu.mesh.position.set(0, xrMode === 'mr' ? L.top - 0.3 : 0.02, 0.35);
-  if (xrMode === 'mr') { mr.buildWindow(settings.winW, settings.winH, skyColor, settings.winDepth + 0.2); applyPlacementOffsets(); }
+  if (xrMode === 'mr') {
+    mr.buildWindow(settings.winW, settings.winH, skyColor, settings.winDepth + 0.2);
+    applyPlacementOffsets();
+    const table = mr.mode === 'table';
+    if (table && world && world.level) {
+      const levelH = Math.min(world.pixelH, 560) * s;
+      mr.buildDiorama({ width: 1.5 * settings.scale + 0.04, depth: 0.34 * settings.scale, front: 0.03 * settings.scale,
+        height: levelH * 1.3, groundImage: env.floorMat.map && env.floorMat.map.image, skyColor });
+    }
+    mr.showDiorama(table);
+  } else mr.showDiorama(false);
   menu.mrMode = mr.mode;
   if (params.has('mrpreview') && !xrState.session) {
     camera.fov = 90; camera.updateProjectionMatrix();
