@@ -76,10 +76,10 @@ export class Hud {
   showHints(scheme, seconds = 12) {
     this.hintScheme = scheme;
     const L = {
-      classic: [['Left stick', 'move · up climb · down crouch'], ['A / X', 'jump  (down + A: drop)'], ['Trigger / B', 'punch'],
-        ['Grip', 'grab & move the world'], ['Right stick', 'resize'], ['Y', 'menu   · left stick click: recenter']],
+      classic: [['Left stick', 'move · up climb · down crouch'], ['A / X', 'jump  (down + A: drop)'], ['Trigger / B', 'punch  (hold down: dig)'],
+        ['Grip', 'grab & move it · both: resize'], ['Right stick', 'zoom'], ['Y', 'menu   · left stick click: recenter']],
       lefty: [['Right stick', 'move · up climb · down crouch'], ['A / X', 'jump  (down + X: drop)'], ['Trigger / Y', 'punch'],
-        ['Grip', 'grab & move the world'], ['Left stick', 'resize'], ['B', 'menu   · right stick click: recenter']],
+        ['Grip', 'grab & move it · both: resize'], ['Left stick', 'zoom'], ['B', 'menu   · right stick click: recenter']],
       onehand: [['Stick', 'move · up climb · down crouch'], ['A / X', 'jump'], ['Trigger / B / Y', 'punch'],
         ['Stick click', 'menu'], ['', ''], ['', '']],
     }[scheme] || [];

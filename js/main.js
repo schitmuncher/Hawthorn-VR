@@ -15,6 +15,7 @@ const saved = JSON.parse(localStorageGet('hawkvr-settings') || '{}');
 export const settings = Object.assign({
   character: 'abed', scheme: 'classic', scale: 1, flatZoom: 1, distance: 1.35, height: -0.18,
   follow: 'smooth', vignette: true, music: 0.45, sfx: 0.8, haptics: true, quality: 'high', shadows: true,
+  winW: 2.0, winH: 1.25, winOffset: 0, winDepth: 0.26, winLift: 0,
 }, saved);
 if (params.get('char')) settings.character = params.get('char');
 export function saveSettings() { localStorageSet('hawkvr-settings', JSON.stringify(settings)); }
@@ -53,7 +54,6 @@ const stage = new THREE.Group();
 anchor.add(stage);
 const BASE_SCALE = 1.25 / 528; // metres per game pixel: 22 tiles ~ 1.25 m tall
 const mr = new MixedReality(renderer, scene, anchor, stage);
-const WINDOW = { w: 2.0, h: 1.25 };
 let xrMode = null; // 'vr' | 'mr' while in a headset session
 
 // HUD and menus float in the room next to the diorama (never head-locked)
@@ -95,7 +95,7 @@ renderer.xr.addEventListener('sessionstart', () => {
     // Passthrough: no sky, no fog, transparent clear; the window/table placement takes over
     sky.visible = false; env.group.visible = false; scene.fog = null;
     renderer.setClearColor(0x000000, 0);
-    mr.buildWindow(WINDOW.w * settings.scale, WINDOW.h * settings.scale, skyColor);
+    mr.buildWindow(settings.winW, settings.winH, skyColor, settings.winDepth + 0.2);
     mr.start(xrState.session);
     hud.toast('Point at a wall or table, pull the trigger', 6);
   } else {
@@ -104,7 +104,8 @@ renderer.xr.addEventListener('sessionstart', () => {
   }
   menu.build();
   applyView();
-  hud.showHints(settings.scheme, 14);
+  started = false;
+  if (xrMode !== 'mr') openTitle();
   // Holding the Meta button to re-centre the view also re-centres the diorama
   xrState.recenterTries = 0;
   // A controller press is a user gesture: use it to start audio if VR was auto-launched
@@ -117,7 +118,8 @@ renderer.xr.addEventListener('sessionstart', () => {
 });
 renderer.xr.addEventListener('sessionend', () => {
   xrState.session = null; xrState.sources = [];
-  document.body.classList.remove('in-xr', 'in-mr');
+  document.body.classList.remove('in-xr', 'in-mr', 'playing');
+  started = false; menu.title = false;
   if (xrMode === 'mr') mr.stop();
   xrMode = null;
   sky.visible = true; env.group.visible = false; scene.fog = mainFog; anchor.visible = true;
@@ -155,6 +157,7 @@ function updatePointers(input) {
 let world = null;
 let characters = [];
 let paused = false;
+let started = params.has('vrpreview') || params.has('mrpreview'); // gameplay only runs after Start / Play
 let lastScheme = settings.scheme;
 const follow = { x: 0, y: 0, vx: 0, ready: false };
 let transition = null; // {t, phase, level, door}
@@ -178,7 +181,7 @@ async function boot() {
     // Debug: fake passthrough room with the game hung on a wall (or stood on a table)
     xrMode = 'mr'; sky.visible = false; scene.fog = null; renderer.setClearColor(0x6b6f76, 1);
     const table = params.get('mrpreview') === 'table';
-    mr.buildWindow(WINDOW.w * settings.scale, WINDOW.h * settings.scale, skyColor);
+    mr.buildWindow(settings.winW, settings.winH, skyColor, settings.winDepth + 0.2);
     mr.place(table ? { pos: new THREE.Vector3(0, 0.75, -1.0), normal: new THREE.Vector3(0, 1, 0), wall: false }
                    : { pos: new THREE.Vector3(0, 1.45, -1.9), normal: new THREE.Vector3(0, 0, 1), wall: true });
     hud.showHints(settings.scheme, 600);
@@ -199,7 +202,7 @@ function onLevelLoaded() {
 const vrLike = () => !!xrState.session || params.has('vrpreview') || params.has('mrpreview');
 // How big the level is in each mode (metres per game pixel)
 function modeFactor() {
-  if (xrMode === 'mr') return mr.mode === 'table' ? 0.46 : (WINDOW.h * 1.12) / 1.25;
+  if (xrMode === 'mr') return mr.mode === 'table' ? 0.46 : (settings.winH * 1.12) / 1.25;
   return 1;
 }
 const stageScale = () => BASE_SCALE * (vrLike() ? settings.scale * modeFactor() : 1);
@@ -216,21 +219,30 @@ function flatDistance() {
 // Where panels sit relative to the anchor, and how the stage is offset inside it
 function layout() {
   const s = stageScale(), levelH = world && world.level ? Math.min(world.pixelH, 560) * s : 1.25;
-  if (xrMode === 'mr' && mr.mode === 'window') return { top: WINDOW.h * settings.scale / 2 + 0.06, stageZ: -0.26, lift: 0 };
+  if (xrMode === 'mr' && mr.mode === 'window') return { top: settings.winH / 2 + 0.06, stageZ: -settings.winDepth, lift: 0 };
   if (xrMode === 'mr' && mr.mode === 'table') return { top: levelH + 0.05, stageZ: 0, lift: levelH / 2 + 24 * s };
   return { top: levelH * 0.5, stageZ: 0, lift: 0 };
+}
+// The window/table spot the user picked, plus their distance-from-wall and raise/lower adjustments
+function applyPlacementOffsets() {
+  const p = mr.placedAt;
+  if (!p || mr.placing) return;
+  anchor.position.copy(p.pos);
+  if (p.wall) anchor.position.addScaledVector(new THREE.Vector3(p.normal.x, 0, p.normal.z).normalize(), 0.002 + settings.winOffset);
+  anchor.position.y += settings.winLift;
 }
 function applyView() {
   const s = stageScale();
   stage.scale.setScalar(s);
   if (world && world.level) world.level.setViewDistance(viewDistancePx());
   const L = layout();
-  const spread = xrMode === 'mr' && mr.mode === 'window' ? WINDOW.w * settings.scale / 2 - 0.2 : 0.44;
+  const spread = xrMode === 'mr' && mr.mode === 'window' ? Math.max(0.3, settings.winW / 2 - 0.2) : 0.44;
   hud.mesh.position.set(-spread, L.top + 0.1, 0.08);
   hud.toastMesh.position.set(0, L.top + 0.02, 0.14);
   hud.hintMesh.position.set(spread, L.top + 0.15, 0.08);
   menu.mesh.position.set(0, xrMode === 'mr' ? L.top - 0.3 : 0.02, 0.35);
-  if (xrMode === 'mr') mr.buildWindow(WINDOW.w * settings.scale, WINDOW.h * settings.scale, skyColor);
+  if (xrMode === 'mr') { mr.buildWindow(settings.winW, settings.winH, skyColor, settings.winDepth + 0.2); applyPlacementOffsets(); }
+  menu.mrMode = mr.mode;
   if (params.has('mrpreview') && !xrState.session) {
     camera.fov = 90; camera.updateProjectionMatrix();
     camera.position.set(0.25, 1.6, 0); camera.lookAt(0, mr.mode === 'table' ? 0.9 : 1.45, -1.5);
@@ -267,6 +279,11 @@ function recenter() {
 function onMenuAction(action, value) {
   switch (action) {
     case 'resume': setPaused(false); break;
+    case 'start':
+      started = true; menu.title = false; setPaused(false);
+      hud.showHints(settings.scheme, 12);
+      if (world && world.level) hud.toast(world.level.data.properties.title || 'Forest', 2, true);
+      break;
     case 'recenter': recenter(); setPaused(false); break;
     case 'recenter-keep': if (xrState.session) recenter(); break;
     case 'character': setCharacter(value); break;
@@ -290,7 +307,11 @@ async function setCharacter(id) {
   hud.dirty = true;
 }
 
+// The in-headset title menu: the game waits here until you choose Start
+function openTitle() { menu.title = true; menu.page = 'main'; menu.index = 0; setPaused(true); }
 function setPaused(p) {
+  if (!p && !started && xrState.session && menu.title && !params.has('vrpreview')) p = true; // can't leave the title menu without starting
+  if (p && !paused) { menu.page = 'main'; menu.index = 0; }
   paused = p;
   menu.open = p;
   document.body.classList.toggle('paused', p && !xrState.session);
@@ -323,7 +344,7 @@ renderer.setAnimationLoop((t, frame) => {
   const input = Input.poll(xrState.sources, settings.scheme);
   if (!world || !world.level) { renderer.render(scene, camera); return; }
 
-  if (input.pausePressed) setPaused(!paused);
+  if (input.pausePressed && (started || !xrState.session)) setPaused(!paused);
   if (input.recenterPressed && xrState.session && xrMode !== 'mr') recenter();
 
   const actionHand = settings.scheme === 'lefty' ? 'left' : 'right';
@@ -331,12 +352,16 @@ renderer.setAnimationLoop((t, frame) => {
     const before = mr.mode;
     const done = mr.update(frame, renderer.xr.getReferenceSpace(), xrState.sources,
       input.xr && (input.xr.triggerPressed[actionHand] || input.xr.triggerPressed[leftHand()]) || input.jumpPressed, actionHand,
-      { w: WINDOW.w * settings.scale, h: WINDOW.h * settings.scale });
+      { w: settings.winW, h: settings.winH });
     if (mr.mode !== before || done) { applyView(); follow.ready = false; }
-    if (done) { haptic(null, 0.5, 60); hud.showHints(settings.scheme, 12); hud.toast(mr.mode === 'window' ? 'Window placed' : 'Placed on the table', 1.5); }
+    if (done) {
+      haptic(null, 0.5, 60);
+      hud.toast(mr.mode === 'window' ? 'Window placed' : 'Placed on the table', 1.5);
+      if (!started) openTitle(); else hud.showHints(settings.scheme, 8);
+    }
   } else if (paused) {
     menu.update(dt, input);
-  } else if (!transition) {
+  } else if (!transition && started) {
     // Zoom (right stick up/down in VR, +/- on keyboard)
     if (input.zoom) {
       const key = xrState.session ? 'scale' : 'flatZoom';
@@ -414,7 +439,11 @@ function updateFollow(dt) {
   const inVR = vrLike();
   const fitsVertically = world.pixelH * s < 1.9 && inVR;
   let ty = fitsVertically ? world.pixelH / 2 - 24 : p.centerY - 20;
-  tx = THREE.MathUtils.clamp(tx, 0, world.pixelW);
+  if (xrMode === 'mr' && mr.mode === 'window') {
+    // Keep the window filled: don't scroll past the level's ends
+    const half = Math.min(world.pixelW / 2, (settings.winW / 2) / s * 0.92);
+    tx = THREE.MathUtils.clamp(tx, half, world.pixelW - half);
+  } else tx = THREE.MathUtils.clamp(tx, 0, world.pixelW);
   if (!fitsVertically) {
     const half = (inVR ? 0.55 : 0.2) / s;
     ty = THREE.MathUtils.clamp(ty, Math.min(half, world.pixelH / 2), Math.max(world.pixelH - half, world.pixelH / 2));
@@ -464,23 +493,42 @@ function updateVignette(dt) {
 // Hold a grip to grab the diorama and move it; hold both grips and pull apart to scale.
 const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
 function handleGrabDrag(input) {
-  if (!xrState.session || !input.xr || paused || settings.scheme === 'onehand' || (xrMode === 'mr' && (mr.mode === 'window' || mr.placing))) { xrState.dragging = null; return; }
+  const mrPlaced = xrMode === 'mr' && mr.placedAt && !mr.placing;
+  if (!xrState.session || !input.xr || paused || settings.scheme === 'onehand' || (xrMode === 'mr' && !mrPlaced)) {
+    if (xrState.dragging && xrState.dragging.changed) saveSettings();
+    xrState.dragging = null; return;
+  }
   const held = Object.values(hands).filter(h => input.xr.grips[h.hand]).map(h => h.grip);
-  if (!held.length) { xrState.dragging = null; return; }
+  if (!held.length) { if (xrState.dragging && xrState.dragging.changed) saveSettings(); xrState.dragging = null; return; }
   const positions = held.map(g => g.getWorldPosition(new THREE.Vector3()));
   const mid = positions.length === 2 ? tmpA.copy(positions[0]).add(positions[1]).multiplyScalar(0.5) : tmpA.copy(positions[0]);
   const span = positions.length === 2 ? positions[0].distanceTo(positions[1]) : 0;
   const d = xrState.dragging;
   if (!d || d.count !== held.length) {
-    xrState.dragging = { count: held.length, mid: mid.clone(), anchor: anchor.position.clone(), span, scale: settings.scale };
+    xrState.dragging = { count: held.length, mid: mid.clone(), anchor: anchor.position.clone(), span,
+      scale: settings.scale, winW: settings.winW, winH: settings.winH, placed: mrPlaced ? mr.placedAt.pos.clone() : null };
     if (settings.haptics) Input.pulse(xrState.sources, null, 0.25, 30);
     return;
   }
-  anchor.position.copy(d.anchor).add(tmpB.copy(mid).sub(d.mid));
-  if (held.length === 2 && d.span > 0.05) {
-    settings.scale = THREE.MathUtils.clamp(d.scale * span / d.span, 0.5, 2.5);
-    applyView(); zoomSaveTimer = 1;
+  const delta = tmpB.copy(mid).sub(d.mid);
+  if (mrPlaced) {
+    // Move the window/table spot freely (pull it off the wall towards you, slide it, raise it)
+    mr.placedAt.pos.copy(d.placed).add(delta);
+  } else {
+    anchor.position.copy(d.anchor).add(delta);
   }
+  if (held.length === 2 && d.span > 0.05) {
+    const k = span / d.span;
+    if (mrPlaced && mr.mode === 'window') {
+      // Pull apart / push together to resize the window itself
+      settings.winW = THREE.MathUtils.clamp(d.winW * k, 0.4, 4);
+      settings.winH = THREE.MathUtils.clamp(d.winH * k, 0.3, 3);
+    } else {
+      settings.scale = THREE.MathUtils.clamp(d.scale * k, 0.4, 2.5);
+    }
+  }
+  d.changed = true;
+  applyView();
 }
 
 // ------------------------------------------------------------------ helpers
@@ -542,7 +590,7 @@ async function buildCharacterPicker() {
   }
 }
 
-$('#play').onclick = () => { Audio.unlock(); Audio.setVolumes(settings.music, settings.sfx); document.body.classList.add('playing'); };
+$('#play').onclick = () => { Audio.unlock(); Audio.setVolumes(settings.music, settings.sfx); document.body.classList.add('playing'); started = true; };
 async function enterVR(quiet) {
   Audio.unlock(); Audio.setVolumes(settings.music, settings.sfx);
   try {
@@ -581,7 +629,7 @@ if ('serviceWorker' in navigator && !params.has('nosw') && location.protocol !==
 }
 $('#menuBtn').onclick = () => setPaused(!paused);
 $('#resume').onclick = () => setPaused(false);
-$('#home').onclick = () => { setPaused(false); document.body.classList.remove('playing'); };
+$('#home').onclick = () => { setPaused(false); started = false; document.body.classList.remove('playing'); };
 if (navigator.xr) navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (ok) document.body.classList.add('xr-ok'); }).catch(() => {});
 
 // Touch controls

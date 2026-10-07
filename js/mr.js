@@ -31,8 +31,9 @@ export class MixedReality {
     this.size = { w: 1.6, h: 1.2, depth: 0.55 };
   }
 
-  buildWindow(w, h, skyColor) {
-    const key = w.toFixed(3) + 'x' + h.toFixed(3);
+  buildWindow(w, h, skyColor, depth = 0.55) {
+    this.size.depth = depth;
+    const key = w.toFixed(3) + 'x' + h.toFixed(3) + 'x' + depth.toFixed(3);
     if (this.builtKey === key) return;
     this.builtKey = key;
     this.size.w = w; this.size.h = h;

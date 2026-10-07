@@ -181,8 +181,10 @@ export class Player {
     if (this.attackBuffer > 0 && this.attackCooldown <= 0) {
       this.attackBuffer = 0;
       this.attackTimer = 0.22; this.attackCooldown = 0.3;
+      // Holding down while punching digs into the block under your feet (or hits things below you mid-air)
+      this.digging = input.down;
       sfx('punch', 0.7, 1, { x: this.centerX, y: this.centerY });
-      world.playerAttack(this.attackBox());
+      world.playerAttack(this.digging ? this.digBox() : this.attackBox());
     }
 
     // --- Gravity + move (half step before and after, as in player.lua)
@@ -202,6 +204,7 @@ export class Player {
     const moving = Math.abs(this.velocity.x) > 10 && (left || right);
     let st;
     if (this.hurtTimer > 0) st = 'hurt';
+    else if (this.attackTimer > 0 && this.digging) st = 'dig';
     else if (this.attackTimer > 0) st = this.jumping ? 'attackjump' : moving ? 'attackwalk' : 'attack';
     else if (this.jumping || !this.solidGround()) st = 'jump';
     else if (this.crouching) st = moving ? 'crawlwalk' : (input.down ? 'crouch' : 'crawlidle');
@@ -209,6 +212,11 @@ export class Player {
     else if (input.up) st = 'gaze';
     else st = 'idle';
     this.setAnim(st);
+  }
+
+  digBox() {
+    // Straight down, a little wider than you so you can dig a block you're half standing on
+    return { x: this.x - 5, y: this.y + this.bbox.height - 4, w: this.w + 10, h: 18 };
   }
 
   attackBox() {

@@ -15,7 +15,7 @@ export class Menu {
   constructor(settings, onAction) {
     this.settings = settings; this.onAction = onAction;
     this.characters = [];
-    this.index = 0; this.open = false;
+    this.index = 0; this.open = false; this.page = 'main'; this.title = false; this.mrMode = 'window';
     this.S = 2.5;
     this.canvas = document.createElement('canvas');
     this.canvas.width = W * this.S; this.canvas.height = 900 * this.S; this.H = 900;
@@ -42,38 +42,63 @@ export class Menu {
     const pct = v => Math.round(v * 100) + '%';
     const vr = () => document.body.classList.contains('in-xr');
     const mrOn = () => document.body.classList.contains('in-mr');
+    const win = () => mrOn() && this.mrMode === 'window';
+    const go = page => () => { this.page = page; this.index = 0; };
     this.items = [
-      { label: 'Resume', act: () => this.onAction('resume') },
+      // ---- main page
+      { label: () => this.title ? 'Start game' : 'Resume', act: () => this.onAction(this.title ? 'start' : 'resume') },
       { label: 'Recenter view', act: () => this.onAction('recenter'), vrOnly: true, notMr: true },
       { label: 'Move game (wall/table)', act: () => this.onAction('place'), mrOnly: true },
+      { label: 'Adjust window  ›', act: go('window'), when: win },
       { label: 'Character', value: () => (this.characters.find(c => c.id === s.character) || {}).name || s.character,
         change: d => this.onAction('character', cycle(this.characters.map(c => c.id), s.character, d)) },
-      { label: 'Controls', value: () => SCHEMES.find(x => x[0] === s.scheme)[1], vrOnly: true,
-        change: d => { s.scheme = cycle(SCHEMES.map(x => x[0]), s.scheme, d); this.onAction('settings'); } },
+      { label: 'Settings  ›', act: go('settings') },
       { label: 'Show controls', act: () => this.onAction('hints'), vrOnly: true },
-      { label: 'Camera follow', value: () => s.follow === 'tight' ? 'Tight' : 'Smooth',
+      { label: 'Respawn at checkpoint', act: () => this.onAction('restart'), when: () => !this.title },
+      { label: 'Exit VR', act: () => this.onAction('exitvr'), vrOnly: true },
+
+      // ---- window page (mixed reality)
+      { page: 'window', label: 'Width', value: () => s.winW.toFixed(2) + ' m',
+        change: d => { s.winW = clamp(round(s.winW + d * 0.1), 0.4, 4); this.onAction('settings'); } },
+      { page: 'window', label: 'Height', value: () => s.winH.toFixed(2) + ' m',
+        change: d => { s.winH = clamp(round(s.winH + d * 0.1), 0.3, 3); this.onAction('settings'); } },
+      { page: 'window', label: 'Distance from wall', value: () => Math.round(s.winOffset * 100) + ' cm',
+        change: d => { s.winOffset = clamp(round(s.winOffset + d * 0.1), 0, 2.5); this.onAction('settings'); } },
+      { page: 'window', label: 'Depth into wall', value: () => Math.round(s.winDepth * 100) + ' cm',
+        change: d => { s.winDepth = clamp(round(s.winDepth + d * 0.05), 0.05, 1.5); this.onAction('settings'); } },
+      { page: 'window', label: 'Raise / lower', value: () => (s.winLift >= 0 ? '+' : '') + Math.round(s.winLift * 100) + ' cm',
+        change: d => { s.winLift = clamp(round(s.winLift + d * 0.05), -1.5, 1.5); this.onAction('settings'); } },
+      { page: 'window', label: 'Game zoom', value: () => pct(s.scale),
+        change: d => { s.scale = clamp(round(s.scale + d * 0.1), 0.4, 2.5); this.onAction('settings'); } },
+      { page: 'window', label: 'Reset window', act: () => { Object.assign(s, { winW: 2, winH: 1.25, winOffset: 0, winDepth: 0.26, winLift: 0, scale: 1 }); this.onAction('settings'); } },
+      { page: 'window', label: 'Place somewhere else', act: () => this.onAction('place') },
+      { page: 'window', label: '‹ Back', act: go('main') },
+
+      // ---- settings page
+      { page: 'settings', label: 'Controls', value: () => SCHEMES.find(x => x[0] === s.scheme)[1], vrOnly: true,
+        change: d => { s.scheme = cycle(SCHEMES.map(x => x[0]), s.scheme, d); this.onAction('settings'); } },
+      { page: 'settings', label: 'Camera follow', value: () => s.follow === 'tight' ? 'Tight' : 'Smooth',
         change: () => { s.follow = s.follow === 'tight' ? 'smooth' : 'tight'; this.onAction('settings'); } },
-      { label: 'Sharpness', value: () => s.quality === 'high' ? 'High' : 'Normal', vrOnly: true,
-        change: () => { s.quality = s.quality === 'high' ? 'normal' : 'high'; this.onAction('settings'); this.onAction('toast', 'Applies next time you enter VR'); } },
-      { label: 'Comfort vignette', value: () => s.vignette ? 'On' : 'Off', vrOnly: true, notMr: true,
-        change: () => { s.vignette = !s.vignette; this.onAction('settings'); } },
-      { label: 'Game size', value: () => pct(s.scale), vrOnly: true,
-        change: d => { s.scale = clamp(round(s.scale + d * 0.1), 0.5, 2.5); this.onAction('settings'); } },
-      { label: 'Distance', value: () => s.distance.toFixed(2) + ' m', vrOnly: true, notMr: true,
+      { page: 'settings', label: 'Game size', value: () => pct(s.scale), vrOnly: true,
+        change: d => { s.scale = clamp(round(s.scale + d * 0.1), 0.4, 2.5); this.onAction('settings'); } },
+      { page: 'settings', label: 'Distance', value: () => s.distance.toFixed(2) + ' m', vrOnly: true, notMr: true,
         change: d => { s.distance = clamp(round(s.distance + d * 0.1), 0.5, 3); this.onAction('settings'); this.onAction('recenter-keep'); } },
-      { label: 'Height', value: () => (s.height >= 0 ? '+' : '') + Math.round(s.height * 100) + ' cm', vrOnly: true, notMr: true,
+      { page: 'settings', label: 'Height', value: () => (s.height >= 0 ? '+' : '') + Math.round(s.height * 100) + ' cm', vrOnly: true, notMr: true,
         change: d => { s.height = clamp(round(s.height + d * 0.05), -0.8, 0.5); this.onAction('settings'); this.onAction('recenter-keep'); } },
-      { label: 'Zoom', value: () => pct(s.flatZoom), flatOnly: true,
+      { page: 'settings', label: 'Zoom', value: () => pct(s.flatZoom), flatOnly: true,
         change: d => { s.flatZoom = clamp(round(s.flatZoom + d * 0.1), 0.5, 2.5); this.onAction('settings'); } },
-      { label: 'Shadows', value: () => s.shadows ? 'On' : 'Off', change: () => { s.shadows = !s.shadows; this.onAction('settings'); } },
-      { label: 'Music', value: () => pct(s.music), change: d => { s.music = clamp(round(s.music + d * 0.1), 0, 1); this.onAction('settings'); } },
-      { label: 'Sound FX', value: () => pct(s.sfx), change: d => { s.sfx = clamp(round(s.sfx + d * 0.1), 0, 1); this.onAction('settings'); } },
-      { label: 'Haptics', value: () => s.haptics ? 'On' : 'Off', vrOnly: true,
+      { page: 'settings', label: 'Comfort vignette', value: () => s.vignette ? 'On' : 'Off', vrOnly: true, notMr: true,
+        change: () => { s.vignette = !s.vignette; this.onAction('settings'); } },
+      { page: 'settings', label: 'Sharpness', value: () => s.quality === 'high' ? 'High' : 'Normal', vrOnly: true,
+        change: () => { s.quality = s.quality === 'high' ? 'normal' : 'high'; this.onAction('settings'); this.onAction('toast', 'Applies next time you enter VR'); } },
+      { page: 'settings', label: 'Shadows', value: () => s.shadows ? 'On' : 'Off', change: () => { s.shadows = !s.shadows; this.onAction('settings'); } },
+      { page: 'settings', label: 'Music', value: () => pct(s.music), change: d => { s.music = clamp(round(s.music + d * 0.1), 0, 1); this.onAction('settings'); } },
+      { page: 'settings', label: 'Sound FX', value: () => pct(s.sfx), change: d => { s.sfx = clamp(round(s.sfx + d * 0.1), 0, 1); this.onAction('settings'); } },
+      { page: 'settings', label: 'Haptics', value: () => s.haptics ? 'On' : 'Off', vrOnly: true,
         change: () => { s.haptics = !s.haptics; this.onAction('settings'); } },
-      { label: 'Respawn at checkpoint', act: () => this.onAction('restart') },
-      { label: 'Exit to title', act: () => this.onAction('exitvr'), vrOnly: true },
+      { page: 'settings', label: '‹ Back', act: go('main') },
     ];
-    this.visibleItems = () => this.items.filter(it => (!it.vrOnly || vr()) && (!it.flatOnly || !vr()) && (!it.mrOnly || mrOn()) && (!it.notMr || !mrOn()));
+    this.visibleItems = () => this.items.filter(it => (it.page || 'main') === this.page && (!it.vrOnly || vr()) && (!it.flatOnly || !vr()) && (!it.mrOnly || mrOn()) && (!it.notMr || !mrOn()) && (!it.when || it.when()));
     this.refresh();
   }
 
@@ -96,18 +121,20 @@ export class Menu {
     g.fillStyle = 'rgba(18,14,28,0.94)'; roundRect(g, 6, 6, W - 12, H - 12, 26); g.fill();
     g.strokeStyle = '#f6d36b'; g.lineWidth = 5; g.stroke();
     g.fillStyle = '#f6d36b'; g.font = `24px ${FONT}`; g.textBaseline = 'middle'; g.textAlign = 'center';
-    g.fillText('PAUSED', W / 2, 40);
+    g.fillText(this.title ? 'HAWKTHORNE VR' : this.page === 'settings' ? 'SETTINGS' : this.page === 'window' ? 'WINDOW' : 'PAUSED', W / 2, 40);
     items.forEach((it, i) => {
       const y = PAD + i * ROW;
       const sel = i === this.index;
       if (sel) { g.fillStyle = 'rgba(246,211,107,0.18)'; roundRect(g, 24, y, W - 48, ROW - 6, 12); g.fill(); }
       g.textAlign = 'left'; g.font = `16px ${FONT}`;
       g.fillStyle = sel ? '#fff' : '#cfc6dd';
-      g.fillText(it.label, 44, y + ROW / 2 - 2);
+      g.fillText(typeof it.label === 'function' ? it.label() : it.label, 44, y + ROW / 2 - 2);
       if (it.value) {
         g.textAlign = 'right';
         g.fillStyle = sel ? '#f6d36b' : '#a99fbb';
-        g.fillText(`‹ ${it.value()} ›`, W - 44, y + ROW / 2 - 2, 380);
+        const txt = `‹ ${it.value()} ›`, tw = Math.min(380, g.measureText(txt).width);
+        g.fillText(txt, W - 44, y + ROW / 2 - 2, 380);
+        it._split = (W - 44 - tw / 2) / W; // pointer: left of this = decrease, right = increase
       }
     });
     this.tex.needsUpdate = true;
@@ -120,7 +147,7 @@ export class Menu {
     const it = items[this.index];
     if (it && it.change && (input.menuLeft || input.menuRight)) { it.change(input.menuLeft ? -1 : 1); this.refresh(); }
     if (input.confirm && it) { if (it.act) it.act(); else if (it.change) it.change(1); this.refresh(); }
-    else if (input.back) this.onAction('resume');
+    else if (input.back) { if (this.page !== 'main') { this.page = 'main'; this.index = 0; this.refresh(); } else if (!this.title) this.onAction('resume'); }
   }
 
   // Pointer support (u, v in 0..1 over the panel, v from the top)
@@ -134,7 +161,7 @@ export class Menu {
   click(u) {
     const it = this.visibleItems()[this.index];
     if (!it) return;
-    if (it.act) it.act(); else if (it.change) it.change(u > 0.4 && u < 0.62 ? -1 : 1);
+    if (it.act) it.act(); else if (it.change) it.change(u < (it._split || 0.75) ? -1 : 1);
     this.refresh();
   }
 }

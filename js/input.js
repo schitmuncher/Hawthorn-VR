@@ -42,7 +42,7 @@ let prevMenu = {};
 /** xrSources: array of XRInputSource (may be empty), scheme: control scheme name */
 export function poll(xrSources = [], scheme = 'classic') {
   let x = 0, up = false, down = false, jumpHeld = false, jumpPressed = false, attackPressed = false;
-  let pausePressed = false, recenterPressed = false, zoom = 0, source = state.source;
+  let pausePressed = false, recenterPressed = false, zoom = 0, source = state.source, backPressed = false;
 
   // Keyboard
   if (any(KB.left)) x -= 1;
@@ -70,6 +70,7 @@ export function poll(xrSources = [], scheme = 'classic') {
       attackPressed ||= pressed(2) || pressed(1) || pressed(7) || pressed(6);
       pausePressed ||= pressed(9);
       recenterPressed ||= pressed(8);
+      backPressed ||= pressed(1);
       zoom -= dz(gp.axes[3] || 0);
     }
   }
@@ -106,6 +107,7 @@ export function poll(xrSources = [], scheme = 'classic') {
       recenterPressed ||= pressed(3);
     } else {
       attackPressed ||= pressed(5);
+      backPressed ||= pressed(5);
     }
   }
 
@@ -128,7 +130,7 @@ export function poll(xrSources = [], scheme = 'classic') {
   state.menuUp = m.u && !prevMenu.u; state.menuDown = m.d && !prevMenu.d;
   state.menuLeft = m.l && !prevMenu.l; state.menuRight = m.r && !prevMenu.r;
   state.confirm = jumpPressed || anyPressed(['Enter']);
-  state.back = anyPressed(['Backspace']);
+  state.back = backPressed || anyPressed(['Backspace']);
   prevMenu = m;
 
   pressedKeys.clear();
