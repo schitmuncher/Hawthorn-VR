@@ -1,0 +1,242 @@
+[
+ {
+  "id": "abed",
+  "name": "Abed Nadir",
+  "bbox": {
+   "width": 14,
+   "height": 41,
+   "duck_height": 20,
+   "x": 17,
+   "y": 7
+  },
+  "sheet": "assets/images/characters/abed/base.png"
+ },
+ {
+  "id": "annie",
+  "name": "Annie Edison",
+  "bbox": {
+   "width": 14,
+   "height": 32,
+   "duck_height": 20,
+   "x": 17,
+   "y": 16
+  },
+  "sheet": "assets/images/characters/annie/base.png"
+ },
+ {
+  "id": "britta",
+  "name": "Britta Perry",
+  "bbox": {
+   "width": 14,
+   "height": 35,
+   "duck_height": 20,
+   "x": 17,
+   "y": 13
+  },
+  "sheet": "assets/images/characters/britta/base.png"
+ },
+ {
+  "id": "buddy",
+  "name": "Buddy",
+  "bbox": {
+   "width": 14,
+   "height": 36,
+   "duck_height": 20,
+   "x": 17,
+   "y": 12
+  },
+  "sheet": "assets/images/characters/buddy/base.png"
+ },
+ {
+  "id": "chang",
+  "name": "Ben Chang",
+  "bbox": {
+   "width": 14,
+   "height": 34,
+   "duck_height": 20,
+   "x": 17,
+   "y": 14
+  },
+  "sheet": "assets/images/characters/chang/base.png"
+ },
+ {
+  "id": "dean",
+  "name": "Dean Craig Pelton",
+  "bbox": {
+   "width": 14,
+   "height": 34,
+   "duck_height": 20,
+   "x": 17,
+   "y": 14
+  },
+  "sheet": "assets/images/characters/dean/base.png"
+ },
+ {
+  "id": "duncan",
+  "name": "Ian Duncan",
+  "bbox": {
+   "width": 14,
+   "height": 43,
+   "duck_height": 20,
+   "x": 17,
+   "y": 5
+  },
+  "sheet": "assets/images/characters/duncan/base.png"
+ },
+ {
+  "id": "fatneil",
+  "name": "Fat Neil",
+  "bbox": {
+   "width": 14,
+   "height": 37,
+   "duck_height": 20,
+   "x": 17,
+   "y": 11
+  },
+  "sheet": "assets/images/characters/fatneil/base.png"
+ },
+ {
+  "id": "garrett",
+  "name": "Garrett Lambert",
+  "bbox": {
+   "width": 14,
+   "height": 43,
+   "duck_height": 20,
+   "x": 17,
+   "y": 5
+  },
+  "sheet": "assets/images/characters/garrett/base.png"
+ },
+ {
+  "id": "gilbert",
+  "name": "Gilbert Lawson",
+  "bbox": {
+   "width": 14,
+   "height": 38,
+   "duck_height": 20,
+   "x": 17,
+   "y": 10
+  },
+  "sheet": "assets/images/characters/gilbert/base.png"
+ },
+ {
+  "id": "guzman",
+  "name": "Luis Guzman",
+  "bbox": {
+   "width": 14,
+   "height": 41,
+   "duck_height": 20,
+   "x": 17,
+   "y": 7
+  },
+  "sheet": "assets/images/characters/guzman/base.png"
+ },
+ {
+  "id": "jeff",
+  "name": "Jeff Winger",
+  "bbox": {
+   "width": 14,
+   "height": 41,
+   "duck_height": 20,
+   "x": 17,
+   "y": 7
+  },
+  "sheet": "assets/images/characters/jeff/base.png"
+ },
+ {
+  "id": "leonard",
+  "name": "Leonard Rodriguez",
+  "bbox": {
+   "width": 14,
+   "height": 34,
+   "duck_height": 20,
+   "x": 17,
+   "y": 14
+  },
+  "sheet": "assets/images/characters/leonard/base.png"
+ },
+ {
+  "id": "pierce",
+  "name": "Pierce Hawthorne",
+  "bbox": {
+   "width": 14,
+   "height": 42,
+   "duck_height": 20,
+   "x": 17,
+   "y": 6
+  },
+  "sheet": "assets/images/characters/pierce/base.png"
+ },
+ {
+  "id": "rich",
+  "name": "Dr. Rich Stephenson",
+  "bbox": {
+   "width": 14,
+   "height": 43,
+   "duck_height": 20,
+   "x": 17,
+   "y": 5
+  },
+  "sheet": "assets/images/characters/rich/base.png"
+ },
+ {
+  "id": "shirley",
+  "name": "Shirley Bennett",
+  "bbox": {
+   "width": 14,
+   "height": 30,
+   "duck_height": 20,
+   "x": 17,
+   "y": 18
+  },
+  "sheet": "assets/images/characters/shirley/base.png"
+ },
+ {
+  "id": "troy",
+  "name": "Troy Barnes",
+  "bbox": {
+   "width": 14,
+   "height": 34,
+   "duck_height": 20,
+   "x": 17,
+   "y": 14
+  },
+  "sheet": "assets/images/characters/troy/base.png"
+ },
+ {
+  "id": "vaughn",
+  "name": "Vaughn Miller",
+  "bbox": {
+   "width": 14,
+   "height": 39,
+   "duck_height": 20,
+   "x": 17,
+   "y": 9
+  },
+  "sheet": "assets/images/characters/vaughn/base.png"
+ },
+ {
+  "id": "vicedean",
+  "name": "Vice Dean Laybourne",
+  "bbox": {
+   "width": 14,
+   "height": 44,
+   "duck_height": 20,
+   "x": 17,
+   "y": 4
+  },
+  "sheet": "assets/images/characters/vicedean/base.png"
+ },
+ {
+  "id": "vicki",
+  "name": "Vicki Cooper",
+  "bbox": {
+   "width": 14,
+   "height": 35,
+   "duck_height": 20,
+   "x": 17,
+   "y": 13
+  },
+  "sheet": "assets/images/characters/vicki/base.png"
+ }
+]
