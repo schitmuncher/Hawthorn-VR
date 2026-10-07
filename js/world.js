@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { buildLevel } from './level.js';
 import { Player, Enemy, Breakable, Pickup, Liquid, Sign, overlap } from './entities.js';
 import { sfx, music } from './audio.js';
-import { platformType } from './collision.js';
+import { platformType, nearestFree } from './collision.js';
 
 export const LEVELS = ['forest', 'forest-2'];
 
@@ -148,6 +148,11 @@ export class World {
     if (!this.level || this.busy) return;
     const p = this.player;
     p.update(dt, input, this);
+    // Safety net: if anything ever leaves the player inside solid ground, pop them out to the nearest free spot
+    if (!p.dead) {
+      const b = p.box, fix = nearestFree(this.map, b.x, b.y, b.w, b.h);
+      if (fix) { p.x += fix[0] - b.x; p.y += fix[1] - b.y; p.velocity.y = Math.min(p.velocity.y, 0); }
+    }
 
     if (p.dead) {
       if (p.deadTimer > 1.6) this.respawn();

@@ -49,7 +49,7 @@ export class Menu {
       { label: () => this.title ? 'Start game' : 'Resume', act: () => this.onAction(this.title ? 'start' : 'resume') },
       { label: 'Recenter view', act: () => this.onAction('recenter'), vrOnly: true, notMr: true },
       { label: 'Move game (wall/table)', act: () => this.onAction('place'), mrOnly: true },
-      { label: 'Adjust window  ›', act: go('window'), when: win },
+      { label: 'Adjust placement  ›', act: go('window'), when: mrOn },
       { label: 'Character', value: () => (this.characters.find(c => c.id === s.character) || {}).name || s.character,
         change: d => this.onAction('character', cycle(this.characters.map(c => c.id), s.character, d)) },
       { label: 'Settings  ›', act: go('settings') },
@@ -58,13 +58,17 @@ export class Menu {
       { label: 'Exit VR', act: () => this.onAction('exitvr'), vrOnly: true },
 
       // ---- window page (mixed reality)
-      { page: 'window', label: 'Width', value: () => s.winW.toFixed(2) + ' m',
+      { page: 'window', label: 'Style', value: () => s.mrStyle === 'window' ? 'Window' : 'Diorama',
+        change: () => { s.mrStyle = s.mrStyle === 'window' ? 'table' : 'window'; this.onAction('settings'); this.onAction('place'); } },
+      { page: 'window', label: 'Snap to walls/tables', value: () => s.mrSnap ? 'On' : 'Off (free)',
+        change: () => { s.mrSnap = !s.mrSnap; this.onAction('settings'); } },
+      { page: 'window', when: win, label: 'Width', value: () => s.winW.toFixed(2) + ' m',
         change: d => { s.winW = clamp(round(s.winW + d * 0.1), 0.4, 4); this.onAction('settings'); } },
-      { page: 'window', label: 'Height', value: () => s.winH.toFixed(2) + ' m',
+      { page: 'window', when: win, label: 'Height', value: () => s.winH.toFixed(2) + ' m',
         change: d => { s.winH = clamp(round(s.winH + d * 0.1), 0.3, 3); this.onAction('settings'); } },
-      { page: 'window', label: 'Distance from wall', value: () => Math.round(s.winOffset * 100) + ' cm',
+      { page: 'window', when: win, label: 'Distance from wall', value: () => Math.round(s.winOffset * 100) + ' cm',
         change: d => { s.winOffset = clamp(round(s.winOffset + d * 0.1), 0, 2.5); this.onAction('settings'); } },
-      { page: 'window', label: 'Depth into wall', value: () => Math.round(s.winDepth * 100) + ' cm',
+      { page: 'window', when: win, label: 'Depth into wall', value: () => Math.round(s.winDepth * 100) + ' cm',
         change: d => { s.winDepth = clamp(round(s.winDepth + d * 0.05), 0.05, 1.5); this.onAction('settings'); } },
       { page: 'window', label: 'Raise / lower', value: () => (s.winLift >= 0 ? '+' : '') + Math.round(s.winLift * 100) + ' cm',
         change: d => { s.winLift = clamp(round(s.winLift + d * 0.05), -1.5, 1.5); this.onAction('settings'); } },
@@ -121,7 +125,7 @@ export class Menu {
     g.fillStyle = 'rgba(18,14,28,0.94)'; roundRect(g, 6, 6, W - 12, H - 12, 26); g.fill();
     g.strokeStyle = '#f6d36b'; g.lineWidth = 5; g.stroke();
     g.fillStyle = '#f6d36b'; g.font = `24px ${FONT}`; g.textBaseline = 'middle'; g.textAlign = 'center';
-    g.fillText(this.title ? 'HAWKTHORNE VR' : this.page === 'settings' ? 'SETTINGS' : this.page === 'window' ? 'WINDOW' : 'PAUSED', W / 2, 40);
+    g.fillText(this.title ? 'HAWKTHORNE VR' : this.page === 'settings' ? 'SETTINGS' : this.page === 'window' ? 'PLACEMENT' : 'PAUSED', W / 2, 40);
     items.forEach((it, i) => {
       const y = PAD + i * ROW;
       const sel = i === this.index;

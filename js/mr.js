@@ -97,71 +97,87 @@ export class MixedReality {
     this.hitSources.clear();
   }
 
-  beginPlacing() { this.placing = true; }
+  beginPlacing() { this.placing = true; this.smooth = null; this.lastHit = null; }
 
   /**
-   * While placing: aim with the controller of `hand`, pull its trigger to place.
-   * Returns true on the frame the game was placed.
+   * Placement mode. The game previews where it will go and follows your pointer smoothly.
+   *  opts.style: 'window' (upright, on walls) | 'table' (lying on a surface)
+   *  opts.snap: true = stick to detected walls/tables (falls back to free when none), false = free placement
+   *  opts.distance: free-placement distance along the pointer (metres)
+   * Returns true on the frame the user confirms.
    */
-  update(frame, refSpace, sources, triggerPressed, hand, windowSize) {
+  update(frame, refSpace, sources, hand, opts) {
     if (!this.active || !this.placing) { this.reticle.visible = false; return false; }
     const src = sources.find(s => s.handedness === hand && s.targetRaySpace) || sources.find(s => s.targetRaySpace);
     if (!src || !frame) return false;
-    let pos = null, normal = null;
-    const hs = this.hitSources.get(src);
+    const rp = frame.getPose(src.targetRaySpace, refSpace);
+    if (!rp) return false;
+    const rm = new THREE.Matrix4().fromArray(rp.transform.matrix);
+    const origin = new THREE.Vector3().setFromMatrixPosition(rm);
+    const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(new THREE.Matrix4().extractRotation(rm)).normalize();
+    const cam = this.renderer.xr.getCamera().getWorldPosition(new THREE.Vector3());
+
+    let pos = null, normal = null, snapped = false;
+    const wantWall = opts.style === 'window';
+    const hs = opts.snap ? this.hitSources.get(src) : null;
     if (hs) {
-      const hit = frame.getHitTestResults(hs)[0];
-      const pose = hit && hit.getPose(refSpace);
-      if (pose) {
+      for (const hit of frame.getHitTestResults(hs)) {
+        const pose = hit.getPose(refSpace);
+        if (!pose) continue;
         const m = new THREE.Matrix4().fromArray(pose.transform.matrix);
-        pos = new THREE.Vector3().setFromMatrixPosition(m);
-        normal = new THREE.Vector3(0, 1, 0).applyMatrix4(new THREE.Matrix4().extractRotation(m)).normalize();
+        const n = new THREE.Vector3(0, 1, 0).applyMatrix4(new THREE.Matrix4().extractRotation(m)).normalize();
+        const isWall = Math.abs(n.y) < 0.5, isTop = n.y > 0.8;
+        if ((wantWall && isWall) || (!wantWall && isTop)) {
+          pos = new THREE.Vector3().setFromMatrixPosition(m); normal = n; snapped = true; break;
+        }
       }
+      // Ignore tiny hit-test jitter so the preview doesn't shimmer on the wall
+      if (snapped && this.lastHit && pos.distanceTo(this.lastHit.pos) < 0.015 && normal.angleTo(this.lastHit.normal) < 0.05) {
+        pos = this.lastHit.pos; normal = this.lastHit.normal;
+      }
+      if (snapped) this.lastHit = { pos: pos.clone(), normal: normal.clone() };
     }
     if (!pos) {
-      // No surface found: float it 1.6 m along the pointer, facing you
-      const rp = frame.getPose(src.targetRaySpace, refSpace);
-      if (!rp) return false;
-      const m = new THREE.Matrix4().fromArray(rp.transform.matrix);
-      const o = new THREE.Vector3().setFromMatrixPosition(m);
-      const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(new THREE.Matrix4().extractRotation(m));
-      pos = o.addScaledVector(dir, 1.6);
-      normal = dir.clone().negate(); normal.y = 0; normal.normalize();
+      // Free placement: along the pointer at the chosen distance, facing you, upright
+      pos = origin.clone().addScaledVector(dir, opts.distance);
+      normal = new THREE.Vector3(cam.x - pos.x, 0, cam.z - pos.z);
+      if (normal.lengthSq() < 1e-4) normal.set(-dir.x, 0, -dir.z);
+      normal.normalize();
+      if (!wantWall) normal.set(0, 1, 0);
     }
-    const wall = Math.abs(normal.y) < 0.6;
+    // Facing: walls face out along their normal; tables/free face the viewer
+    let yaw;
+    if (wantWall) yaw = Math.atan2(normal.x, normal.z);
+    else yaw = Math.atan2(cam.x - pos.x, cam.z - pos.z);
+    // Smooth the preview so it glides instead of jumping between frames
+    if (!this.smooth) this.smooth = { pos: pos.clone(), yaw };
+    const k = 1 - Math.exp(-(opts.dt || 0.016) * (snapped ? 18 : 12));
+    this.smooth.pos.lerp(pos, k);
+    let dy = yaw - this.smooth.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    this.smooth.yaw += dy * k;
+
     this.reticle.visible = true;
-    this.reticle.position.copy(pos);
-    // Orient reticle to the surface; preview rectangle shows the window size on walls
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-    if (wall) {
-      const yaw = Math.atan2(normal.x, normal.z);
-      q.setFromEuler(new THREE.Euler(0, yaw, 0));
-      this.preview.scale.set(windowSize.w, windowSize.h, 1);
-      this.preview.rotation.set(0, 0, 0);
-    } else {
-      this.preview.scale.set(windowSize.w, 0.5, 1);
-      this.preview.rotation.set(0, 0, 0);
-    }
-    this.reticle.quaternion.copy(q);
-    this.pending = { pos, normal, wall };
-    // Live preview: the game follows your pointer until you pull the trigger
-    this.place(this.pending, !!triggerPressed);
-    return !!triggerPressed;
+    this.reticle.position.copy(this.smooth.pos);
+    if (wantWall) { this.reticle.rotation.set(0, this.smooth.yaw, 0); this.preview.scale.set(opts.size.w, opts.size.h, 1); }
+    else { this.reticle.rotation.set(-Math.PI / 2, 0, this.smooth.yaw); this.preview.scale.set(opts.size.w * 0.75, 0.5, 1); }
+    this.snapped = snapped;
+    const flatNormal = new THREE.Vector3(Math.sin(this.smooth.yaw), 0, Math.cos(this.smooth.yaw));
+    this.pending = { pos: this.smooth.pos.clone(), normal: wantWall ? flatNormal : new THREE.Vector3(0, 1, 0), wall: wantWall, yaw: this.smooth.yaw };
+    this.place(this.pending, !!opts.confirm);
+    return !!opts.confirm;
   }
 
-  place({ pos, normal, wall }, final = true) {
-    if (final) { this.placing = false; this.reticle.visible = false; }
+  place({ pos, normal, wall, yaw }, final = true) {
+    if (final) { this.placing = false; this.reticle.visible = false; this.smooth = null; }
     this.mode = wall ? 'window' : 'table';
-    this.placedAt = { pos: pos.clone(), normal: normal.clone(), wall };
+    this.placedAt = { pos: pos.clone(), normal: normal.clone(), wall, yaw };
     this.anchor.position.copy(pos);
-    if (wall) {
-      this.anchor.rotation.set(0, Math.atan2(normal.x, normal.z), 0);
-      this.anchor.position.addScaledVector(new THREE.Vector3(normal.x, 0, normal.z).normalize(), 0.002);
-    } else {
-      // Table: face the diorama towards the viewer
+    if (yaw === undefined) {
       const cam = this.renderer.xr.getCamera().getWorldPosition(new THREE.Vector3());
-      this.anchor.rotation.set(0, Math.atan2(cam.x - pos.x, cam.z - pos.z), 0);
+      yaw = wall ? Math.atan2(normal.x, normal.z) : Math.atan2(cam.x - pos.x, cam.z - pos.z);
+      this.placedAt.yaw = yaw;
     }
+    this.anchor.rotation.set(0, yaw, 0);
     this.window.visible = wall;
   }
 }

@@ -15,7 +15,7 @@ const saved = JSON.parse(localStorageGet('hawkvr-settings') || '{}');
 export const settings = Object.assign({
   character: 'abed', scheme: 'classic', scale: 1, flatZoom: 1, distance: 1.35, height: -0.18,
   follow: 'smooth', vignette: true, music: 0.45, sfx: 0.8, haptics: true, quality: 'high', shadows: true,
-  winW: 2.0, winH: 1.25, winOffset: 0, winDepth: 0.26, winLift: 0,
+  winW: 2.0, winH: 1.25, winOffset: 0, winDepth: 0.26, winLift: 0, mrStyle: 'window', mrSnap: true, mrDist: 1.5,
 }, saved);
 if (params.get('char')) settings.character = params.get('char');
 export function saveSettings() { localStorageSet('hawkvr-settings', JSON.stringify(settings)); }
@@ -97,7 +97,7 @@ renderer.xr.addEventListener('sessionstart', () => {
     renderer.setClearColor(0x000000, 0);
     mr.buildWindow(settings.winW, settings.winH, skyColor, settings.winDepth + 0.2);
     mr.start(xrState.session);
-    hud.toast('Point at a wall or table, pull the trigger', 6);
+    placementHelp();
   } else {
     xrState.needsRecenter = true;
     env.group.visible = true;
@@ -293,7 +293,7 @@ function onMenuAction(action, value) {
       break;
     case 'hints': hud.showHints(settings.scheme, 12); setPaused(false); break;
     case 'toast': hud.toast(value, 2.5); break;
-    case 'place': setPaused(false); mr.beginPlacing(); hud.toast('Point at a wall or table, pull the trigger', 4); break;
+    case 'place': setPaused(false); mr.beginPlacing(); placementHelp(); break;
     case 'restart': world.respawn(); setPaused(false); break;
     case 'exitvr': setPaused(false); xrState.session && xrState.session.end(); break;
   }
@@ -330,6 +330,12 @@ function updateListener() {
   Audio.setListener(_lp, _lf, _lu);
 }
 
+function placementHelp() {
+  const style = settings.mrStyle === 'window' ? 'Window' : 'Diorama';
+  const snap = !settings.mrSnap ? 'Free' : (mr.snapped ? (settings.mrStyle === 'window' ? 'Snapped to wall' : 'Snapped to surface') : 'Snap: no surface, free');
+  hud.toast(`${style} · ${snap}  —  Trigger: place  A: snap  B: style`, 6);
+}
+
 // ------------------------------------------------------------------ main loop
 const clock = new THREE.Clock();
 renderer.setAnimationLoop((t, frame) => {
@@ -349,14 +355,22 @@ renderer.setAnimationLoop((t, frame) => {
 
   const actionHand = settings.scheme === 'lefty' ? 'left' : 'right';
   if (xrMode === 'mr' && mr.placing) {
-    const before = mr.mode;
-    const done = mr.update(frame, renderer.xr.getReferenceSpace(), xrState.sources,
-      input.xr && (input.xr.triggerPressed[actionHand] || input.xr.triggerPressed[leftHand()]) || input.jumpPressed, actionHand,
-      { w: settings.winW, h: settings.winH });
+    // Placement: trigger places · A snap on/off · B window/diorama · stick up/down distance (free mode)
+    if (input.jumpPressed) { settings.mrSnap = !settings.mrSnap; placementHelp(); saveSettings(); }
+    if (input.back) { settings.mrStyle = settings.mrStyle === 'window' ? 'table' : 'window'; mr.smooth = null; placementHelp(); saveSettings(); }
+    const dz = input.zoom + (input.up ? 1 : 0) - (input.down ? 1 : 0);
+    if (dz) settings.mrDist = THREE.MathUtils.clamp(settings.mrDist + dz * dt * 1.2, 0.4, 4);
+    const before = mr.mode, wasSnapped = mr.snapped;
+    const confirm = !!(input.xr && (input.xr.triggerPressed[actionHand] || input.xr.triggerPressed[leftHand()]));
+    const done = mr.update(frame, renderer.xr.getReferenceSpace(), xrState.sources, actionHand, {
+      style: settings.mrStyle, snap: settings.mrSnap, distance: settings.mrDist, confirm, dt,
+      size: { w: settings.winW, h: settings.winH },
+    });
     if (mr.mode !== before || done) { applyView(); follow.ready = false; }
+    if (settings.mrSnap && wasSnapped !== mr.snapped && !done) placementHelp();
     if (done) {
       haptic(null, 0.5, 60);
-      hud.toast(mr.mode === 'window' ? 'Window placed' : 'Placed on the table', 1.5);
+      hud.toast(mr.mode === 'window' ? 'Window placed' : 'Placed', 1.5);
       if (!started) openTitle(); else hud.showHints(settings.scheme, 8);
     }
   } else if (paused) {
@@ -439,9 +453,10 @@ function updateFollow(dt) {
   const inVR = vrLike();
   const fitsVertically = world.pixelH * s < 1.9 && inVR;
   let ty = fitsVertically ? world.pixelH / 2 - 24 : p.centerY - 20;
-  if (xrMode === 'mr' && mr.mode === 'window') {
-    // Keep the window filled: don't scroll past the level's ends
-    const half = Math.min(world.pixelW / 2, (settings.winW / 2) / s * 0.92);
+  if (xrMode === 'mr') {
+    // Keep the window / tabletop filled: don't scroll past the level's ends
+    const halfM = mr.mode === 'window' ? settings.winW / 2 * 0.92 : 0.75 * settings.scale;
+    const half = Math.min(world.pixelW / 2, halfM / s);
     tx = THREE.MathUtils.clamp(tx, half, world.pixelW - half);
   } else tx = THREE.MathUtils.clamp(tx, 0, world.pixelW);
   if (!fitsVertically) {
@@ -465,7 +480,7 @@ function updateFollow(dt) {
 }
 
 // Table mode: trim the endless level strip to a tabletop-sized slice
-const tablePlanes = [new THREE.Plane(), new THREE.Plane()];
+const tablePlanes = [new THREE.Plane(), new THREE.Plane(), new THREE.Plane()];
 let clipFrame = 0;
 function updateTableClip() {
   const on = xrMode === 'mr' && mr.mode === 'table';
@@ -476,6 +491,7 @@ function updateTableClip() {
   const a = anchor.position;
   tablePlanes[0].setFromNormalAndCoplanarPoint(xAxis, a.clone().addScaledVector(xAxis, -hw));
   tablePlanes[1].setFromNormalAndCoplanarPoint(xAxis.clone().negate(), a.clone().addScaledVector(xAxis, hw));
+  tablePlanes[2].setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), a.clone().add(new THREE.Vector3(0, -0.005, 0))); // nothing below the table top
   if (clipFrame++ % 30 === 0) stage.traverse(o => {
     if (!o.material) return;
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) if (m.clippingPlanes !== tablePlanes) { m.clippingPlanes = tablePlanes; m.needsUpdate = true; }

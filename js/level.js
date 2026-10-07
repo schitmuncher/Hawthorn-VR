@@ -72,18 +72,52 @@ export async function buildLevel(data, opts = {}) {
   const tsFor = gid => { let r = null; for (const t of tilesets) if (gid >= t.firstgid) r = t; return r; };
 
   const map = { width: W, height: H, tilewidth: tw, tileheight: th, coll: Int16Array.from(data.collision || []) };
+  const visible = data.layers.filter(l => l.visible !== false);
+  const flatLayers = visible.filter(l => !l.properties.parallax || +l.properties.parallax === 1);
+  const parallaxLayers = visible.filter(l => l.properties.parallax && +l.properties.parallax !== 1);
+
+  // How opaque each tile is (0..1), so we know which art is "solid earth"
+  const opacityCache = new Map();
+  const tileOpacity = gid => {
+    if (opacityCache.has(gid)) return opacityCache.get(gid);
+    const ts = tsFor(gid); let v = 0;
+    if (ts) {
+      if (!ts.alpha) { const c = document.createElement('canvas'); c.width = ts.width; c.height = ts.height; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(ts.img, 0, 0); ts.alpha = g.getImageData(0, 0, ts.width, ts.height).data; }
+      const local = gid - ts.firstgid, x0 = (local % ts.cols) * tw, y0 = Math.floor(local / ts.cols) * th;
+      let n = 0; for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) if (ts.alpha[((y0 + y) * ts.width + x0 + x) * 4 + 3] > 127) n++;
+      v = n / (tw * th);
+    }
+    opacityCache.set(gid, v); return v;
+  };
+  // "Earth fill": art below the lowest collision tile of a column, hanging from a solid block.
+  // In the 2D game this is just painted ground; in 3D we extrude it so ground masses look solid
+  // (otherwise the ground reads as a thin shell and drops are hard to spot).
+  const fill = new Uint8Array(W * H);
+  for (let c = 0; c < W; c++) {
+    let lowest = -1;
+    for (let r = 0; r < H; r++) if (map.coll[r * W + c] >= 0) lowest = r;
+    if (lowest < 0) continue;
+    const id = map.coll[lowest * W + c], t = platformType(id);
+    if (!(t === 'block' || t === 'ice-block') || isSloped(id)) continue;
+    for (let r = lowest + 1; r < H; r++) {
+      const i = r * W + c;
+      let op = 0;
+      for (const l of flatLayers) if (l.data[i] && !l.properties.foreground && l.opacity >= 1) op = Math.max(op, tileOpacity(l.data[i]));
+      if (op < 0.9) break;
+      fill[i] = 1;
+    }
+  }
+  const kindAt = i => { if (fill[i]) return 'fill'; const id = map.coll[i]; return id < 0 ? null : platformType(id); };
+  const isBlockKind = k => k === 'block' || k === 'ice-block' || k === 'fill';
   const solidAt = (c, r) => {
     if (c < 0 || c >= W || r < 0 || r >= H) return false;
-    const id = map.coll[r * W + c];
+    const i = r * W + c;
+    if (fill[i]) return true;
+    const id = map.coll[i];
     if (id < 0) return false;
     const p = platformType(id);
     return (p === 'block' || p === 'ice-block') && !isSloped(id);
   };
-  const kindAt = i => { const id = map.coll[i]; return id < 0 ? null : platformType(id); };
-
-  const visible = data.layers.filter(l => l.visible !== false);
-  const flatLayers = visible.filter(l => !l.properties.parallax || +l.properties.parallax === 1);
-  const parallaxLayers = visible.filter(l => l.properties.parallax && +l.properties.parallax !== 1);
 
   // --- Composite atlas for solid cells (all flat layers stacked into one 24x24 image).
   const atlasCols = 64;
@@ -93,7 +127,7 @@ export async function buildLevel(data, opts = {}) {
   const onewayLayer = new Int32Array(W * H).fill(-1);
   for (let i = 0; i < W * H; i++) {
     const kind = kindAt(i);
-    if (kind === 'block' || kind === 'ice-block') {
+    if (isBlockKind(kind)) {
       const gids = [];
       for (const l of flatLayers) if (l.data[i] && !l.properties.foreground && l.opacity >= 1) gids.push(l.data[i]);
       if (!gids.length) continue;
@@ -149,7 +183,7 @@ export async function buildLevel(data, opts = {}) {
     const e = byIndex[cellEntry[i]];
     const x0 = c * tw, x1 = x0 + tw, y0 = r * th, y1 = y0 + th;
     const id = map.coll[i];
-    if (kind === 'block' || kind === 'ice-block') {
+    if (isBlockKind(kind)) {
       let yl = y0, yr = y0;
       const sloped = isSloped(id);
       if (sloped) { const [l, rr] = slopeEdges(id); yl = y0 + l; yr = y0 + rr; }
@@ -157,7 +191,7 @@ export async function buildLevel(data, opts = {}) {
       if (sloped || !solidAt(c, r - 1)) {
         const row = sloped ? Math.min(th - 1, e.topRow + 1) : e.topRow;
         const uv = uvRect(e.ax, e.ay + row, tw, 1, AW, AH, 0.3);
-        solid.quad([[x0, -yl, F], [x1, -yr, F], [x1, -yr, -B], [x0, -yl, -B]], uv, 1.0);
+        solid.quad([[x0, -yl, F], [x1, -yr, F], [x1, -yr, -B], [x0, -yl, -B]], uv, 1.18);
       }
       if (!solidAt(c - 1, r)) {
         const uv = uvRect(e.ax + e.leftCol, e.ay, 1, th, AW, AH, 0.3);
@@ -168,7 +202,7 @@ export async function buildLevel(data, opts = {}) {
         const uv = uvRect(e.ax + e.rightCol, e.ay, 1, th, AW, AH, 0.3);
         solid.quad([[x1, -y1, F], [x1, -y1, -B], [x1, -yr, -B], [x1, -yr, F]], [uv[0], uv[1], uv[2], uv[3]], 0.68);
       }
-      if (!solidAt(c, r + 1) && kindAt(i + W) !== 'block') {
+      if (!solidAt(c, r + 1) && !isBlockKind(kindAt(i + W))) {
         const uv = uvRect(e.ax, e.ay + th - 1, tw, 1, AW, AH, 0.3);
         solid.quad([[x0, -y1, -B], [x1, -y1, -B], [x1, -y1, F], [x0, -y1, F]], uv, 0.45);
       }
@@ -178,7 +212,7 @@ export async function buildLevel(data, opts = {}) {
       if (isSloped(id)) { const [l, rr] = slopeEdges(id); yl = y0 + l; yr = y0 + rr; }
       const T = 4;
       const uvTop = uvRect(e.ax, e.ay + e.topRow, tw, 1, AW, AH, 0.3);
-      solid.quad([[x0, -yl, F - 1], [x1, -yr, F - 1], [x1, -yr, OB], [x0, -yl, OB]], uvTop, 1.0);
+      solid.quad([[x0, -yl, F - 1], [x1, -yr, F - 1], [x1, -yr, OB], [x0, -yl, OB]], uvTop, 1.18);
       const uvUnder = uvRect(e.ax, e.ay + Math.min(th - 1, e.topRow + T), tw, 1, AW, AH, 0.3);
       solid.quad([[x0, -yl - T, OB], [x1, -yr - T, OB], [x1, -yr - T, F - 1], [x0, -yl - T, F - 1]], uvUnder, 0.45);
       const uvL = uvRect(e.ax + e.leftCol, e.ay + e.topRow, 1, T, AW, AH, 0.3);
@@ -194,15 +228,15 @@ export async function buildLevel(data, opts = {}) {
   if (solidMesh) { solidMesh.name = 'solid'; root.add(solidMesh); }
 
   // --- Flat tile layers (decor and edges)
-  const isSolidCell = i => { const k = kindAt(i); return k === 'block' || k === 'ice-block'; };
+  const isSolidCell = i => isBlockKind(kindAt(i));
   flatLayers.forEach((layer, li) => {
     let onSolid = 0, total = 0;
     for (let i = 0; i < W * H; i++) if (layer.data[i]) { total++; if (kindAt(i) !== null) onSolid++; }
     const ground = total > 0 && onSolid / total >= 0.5;
-    let z;
+    let z, shade = 1;
     if (layer.properties.foreground) z = F + 6 + li * 0.05;
     else if (ground) z = F - 1.5 + li * 0.02;
-    else z = DZ + li * 0.3;
+    else { z = DZ + li * 0.3; shade = 0.8; } // background decor sits back and slightly darker so the play layer reads clearly
     const batches = new Map();
     for (let i = 0; i < W * H; i++) {
       const gid = layer.data[i];
@@ -217,7 +251,7 @@ export async function buildLevel(data, opts = {}) {
       const c = i % W, r = Math.floor(i / W);
       const x0 = c * tw, y0 = r * th;
       batches.get(ts).quad([[x0, -(y0 + th), z], [x0 + tw, -(y0 + th), z], [x0 + tw, -y0, z], [x0, -y0, z]],
-        uvRect((local % ts.cols) * tw, Math.floor(local / ts.cols) * th, tw, th, ts.width, ts.height), 1);
+        uvRect((local % ts.cols) * tw, Math.floor(local / ts.cols) * th, tw, th, ts.width, ts.height), shade);
     }
     for (const [ts, b] of batches) {
       const translucent = layer.opacity < 1;
@@ -227,6 +261,41 @@ export async function buildLevel(data, opts = {}) {
       if (mesh) { mesh.name = 'layer:' + layer.name; mesh.renderOrder = translucent ? 10 + li : 0; root.add(mesh); }
     }
   });
+
+  // --- Bottomless pits: a dark gradient falls away inside them so a drop never looks like solid floor
+  {
+    const cv = document.createElement('canvas'); cv.width = 1; cv.height = 128;
+    const g = cv.getContext('2d'), grad = g.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0, 'rgba(8,4,18,0.0)'); grad.addColorStop(0.12, 'rgba(8,4,18,0.45)');
+    grad.addColorStop(0.45, 'rgba(8,4,18,0.88)'); grad.addColorStop(1, 'rgba(8,4,18,0.97)');
+    g.fillStyle = grad; g.fillRect(0, 0, 1, 128);
+    const tex = new THREE.CanvasTexture(cv);
+    const solidOrPlatform = (c, r) => fill[r * W + c] || map.coll[r * W + c] >= 0;
+    const pitTop = new Int32Array(W).fill(-1);
+    for (let c = 0; c < W; c++) {
+      if (solidOrPlatform(c, H - 1)) continue;
+      let r0 = H - 1;
+      while (r0 > 0 && !solidOrPlatform(c, r0 - 1)) r0--;
+      if (r0 > H - 4) continue; // ground that simply ends near the bottom edge isn't a pit
+      // Only real pits: the column must have ground somewhere above-ish nearby (not open sky edges of the map)
+      pitTop[c] = Math.max(r0, 1);
+    }
+    const pits = new Batch();
+    for (let c = 0; c < W;) {
+      if (pitTop[c] < 0) { c++; continue; }
+      // Start the gradient level with the lower of the neighbouring ledges
+      let c1 = c; while (c1 + 1 < W && pitTop[c1 + 1] >= 0) c1++;
+      const left = c > 0 ? groundTop(c - 1) : null, right = c1 + 1 < W ? groundTop(c1 + 1) : null;
+      const ledge = Math.max(left ?? 0, right ?? 0, Math.min(...Array.from({ length: c1 - c + 1 }, (_, k) => pitTop[c + k])) * th - 3 * th);
+      const top = Math.max(ledge, 0) + th * 0.5, bottom = H * th + th * 4;
+      const x0 = c * tw, x1 = (c1 + 1) * tw;
+      pits.quad([[x0, -bottom, -3], [x1, -bottom, -3], [x1, -top, -3], [x0, -top, -3]], [[0, 0], [1, 0], [1, 1], [0, 1]], 1);
+      c = c1 + 1;
+    }
+    function groundTop(c) { for (let r = 0; r < H; r++) if (solidOrPlatform(c, r)) return r * th; return null; }
+    const pm = pits.build(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
+    if (pm) { pm.name = 'pits'; pm.renderOrder = 5; root.add(pm); }
+  }
 
   // --- Parallax layers become real depth planes
   const parallaxGroups = [];
@@ -242,7 +311,7 @@ export async function buildLevel(data, opts = {}) {
       const c = i % W, r = Math.floor(i / W);
       const x0 = c * tw, y0 = r * th;
       b.quad([[x0, -(y0 + th), 0], [x0 + tw, -(y0 + th), 0], [x0 + tw, -y0, 0], [x0, -y0, 0]],
-        uvRect((local % ts.cols) * tw, Math.floor(local / ts.cols) * th, tw, th, ts.width, ts.height), 1);
+        uvRect((local % ts.cols) * tw, Math.floor(local / ts.cols) * th, tw, th, ts.width, ts.height), 0.72);
     }
     const mat = new THREE.MeshBasicMaterial({ map: ts.texture, vertexColors: true, alphaTest: 0.5,
       transparent: layer.opacity < 1, opacity: layer.opacity, fog: true });

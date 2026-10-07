@@ -99,7 +99,9 @@ export class Player {
     const climb = world.climbables.find(c => overlap(this.box, c));
     if (!this.climbing && climb && (input.up || (input.down && !grounded))) {
       this.climbing = climb; this.jumping = false; this.velocity.x = 0; this.velocity.y = 0;
-      this.x = climb.x + climb.w / 2 - this.w / 2;
+      this.crouching = false;
+      // Slide onto the vine through the collision code so we can never be pushed into a wall
+      this.x = C.moveX(map, { velocity: { x: 0, y: 0 } }, this.x, this.y, this.w, this.bbox.height, climb.x + climb.w / 2 - this.w / 2 - this.x);
     }
     if (this.climbing) {
       if (!overlap(this.box, this.climbing)) this.climbing = null;

@@ -213,7 +213,8 @@ export function moveY(map, body, x, y, width, height, dx, dy) {
         const h = specialInterpY(id, tileX, x, width, dir);
         tileY = h !== null ? tileY - map.tilewidth + h : newY + height * 2;
       }
-      if (y > tileY && tileY >= newY) {
+      // >= (not >): a body resting exactly against a ceiling (e.g. climbing, no gravity) must not slip through
+      if (y >= tileY && tileY >= newY && newY < tileY) {
         if (body.velocity) body.velocity.y = 0;
         body.ceilingPushback && body.ceilingPushback();
         return tileY;
@@ -235,4 +236,32 @@ export function canStand(map, body, x, y, width, height, newHeight) {
   const probe = { velocity: { x: 0, y: 0 } };
   const ny = moveY(map, probe, x, y, width, height, 0, change);
   return ny === y + change;
+}
+
+// True when the box overlaps a solid, non-sloped block tile (i.e. the body is stuck inside the level).
+export function embedded(map, x, y, w, h) {
+  const tw = map.tilewidth, th = map.tileheight;
+  const c0 = Math.floor((x + 1) / tw), c1 = Math.floor((x + w - 2) / tw);
+  const r0 = Math.floor((y + 1) / th), r1 = Math.floor((y + h - 2) / th);
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    if (c < 0 || r < 0 || c >= map.width || r >= map.height) continue;
+    const id = map.coll[r * map.width + c];
+    if (id < 0 || isSloped(id) || isSpecial(id)) continue;
+    const t = platformType(id);
+    if (t === 'block' || t === 'ice-block') return true;
+  }
+  return false;
+}
+
+// Find the nearest free spot for a stuck box: prefers up, then sideways, then down. Returns [x, y] or null.
+export function nearestFree(map, x, y, w, h) {
+  if (!embedded(map, x, y, w, h)) return null;
+  for (let d = 2; d <= 72; d += 2) {
+    for (const [dx, dy] of [[0, -d], [-d, 0], [d, 0], [-d, -d], [d, -d], [0, d]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx + w > map.width * map.tilewidth) continue;
+      if (!embedded(map, nx, ny, w, h)) return [nx, ny];
+    }
+  }
+  return null;
 }
